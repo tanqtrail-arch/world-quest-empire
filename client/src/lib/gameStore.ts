@@ -35,6 +35,9 @@ export interface AIAction {
   resourceAmount?: number;
   // build
   buildType?: string;
+  buildCost?: Partial<Record<ResourceType, number>>;
+  buildTileId?: number;
+  buildVP?: number;
   // highlighted tiles
   highlightTileIds?: number[];
 }
@@ -56,6 +59,8 @@ interface GameStore extends GameState {
   aiActionQueue: AIAction[];
   currentAIAction: AIAction | null;
   isPlayingAI: boolean;
+  finalSimPlayers: Player[] | null;
+  finalSimTiles: GameTile[] | null;
 
   // Game Setup
   initGame: (playerName: string, playerCount: number, difficulty: Difficulty, selectedCountryIndex?: number) => void;
@@ -113,6 +118,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
   aiActionQueue: [],
   currentAIAction: null,
   isPlayingAI: false,
+  finalSimPlayers: null as Player[] | null,
+  finalSimTiles: null as GameTile[] | null,
 
   setScreen: (screen) => set({ screen }),
 
@@ -205,22 +212,81 @@ export const useGameStore = create<GameStore>((set, get) => ({
     const state = get();
     const queue = [...state.aiActionQueue];
     if (queue.length === 0) {
-      // All AI actions done, return to human player
-      set({
+      // All AI actions done - apply final simulation state for structures/VP/costs
+      const finalUpdate: Record<string, unknown> = {
         currentAIAction: null,
         isPlayingAI: false,
         aiActionQueue: [],
         highlightedTileIds: [],
-      });
+        finalSimPlayers: null,
+        finalSimTiles: null,
+      };
+      if (state.finalSimPlayers && state.finalSimTiles) {
+        // Merge final sim state: keep resource values from current state.players
+        // (since we've been applying resource_gain step by step)
+        // but take structures, VP, and other build-related changes from sim
+        finalUpdate.players = state.finalSimPlayers.map(simP => {
+          const currentP = state.players.find(p => p.id === simP.id);
+          return {
+            ...simP,
+            resources: currentP ? { ...currentP.resources } : { ...simP.resources },
+            structures: [...simP.structures],
+          };
+        });
+        finalUpdate.tiles = state.finalSimTiles.map(t => ({
+          ...t,
+          structures: [...t.structures],
+        }));
+      }
+      set(finalUpdate as any);
       return;
     }
 
     const next = queue.shift()!;
-    set({
-      currentAIAction: next,
-      aiActionQueue: queue,
-      highlightedTileIds: next.highlightTileIds || [],
-    });
+
+    // For resource_gain actions, apply the resource change step by step
+    // Since doEndTurn now uses simulated copies, the original state.players are unchanged
+    // We need to actually add resources here
+    if (next.type === 'resource_gain' && next.resource && next.resourceAmount) {
+      const updatedPlayers = state.players.map(p => {
+        if (p.id === next.playerId) {
+          return {
+            ...p,
+            resources: {
+              ...p.resources,
+              [next.resource!]: p.resources[next.resource!] + next.resourceAmount!,
+            },
+            structures: [...p.structures],
+          };
+        }
+        return { ...p, resources: { ...p.resources }, structures: [...p.structures] };
+      });
+      set({
+        currentAIAction: next,
+        aiActionQueue: queue,
+        highlightedTileIds: next.highlightTileIds || [],
+        players: updatedPlayers,
+      });
+    } else if (next.type === 'build' || next.type === 'upgrade') {
+      // Build/upgrade actions: deep copy to reflect structure changes from simulation
+      const updatedPlayers = state.players.map(p => ({
+        ...p,
+        resources: { ...p.resources },
+        structures: [...p.structures],
+      }));
+      set({
+        currentAIAction: next,
+        aiActionQueue: queue,
+        highlightedTileIds: next.highlightTileIds || [],
+        players: updatedPlayers,
+      });
+    } else {
+      set({
+        currentAIAction: next,
+        aiActionQueue: queue,
+        highlightedTileIds: next.highlightTileIds || [],
+      });
+    }
   },
 
   clearAIAction: () => {
@@ -283,6 +349,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
       aiActionQueue: [],
       currentAIAction: null,
       isPlayingAI: false,
+      finalSimPlayers: null,
+      finalSimTiles: null,
     });
   },
 
@@ -564,8 +632,20 @@ export const useGameStore = create<GameStore>((set, get) => ({
     let gameEnded = false;
     let winnerPlayer: Player | null = null;
 
-    while (state.players[idx].isAI) {
-      const aiP = state.players[idx];
+    // Create deep copies of players and tiles so mutations during pre-computation
+    // don't affect the store state until playNextAIAction applies them step by step.
+    const simPlayers = state.players.map(p => ({
+      ...p,
+      resources: { ...p.resources },
+      structures: [...p.structures],
+    }));
+    const simTiles = state.tiles.map(t => ({
+      ...t,
+      structures: [...t.structures],
+    }));
+
+    while (simPlayers[idx].isAI) {
+      const aiP = simPlayers[idx];
 
       // Turn start announcement
       aiActions.push({
@@ -579,11 +659,27 @@ export const useGameStore = create<GameStore>((set, get) => ({
       // AI rolls dice
       const dice = rollDice();
       const total = dice[0] + dice[1];
-      const gains = distributeResources(state.tiles, state.players, total);
 
-      const matchingTileIds = state.tiles
+      // Calculate resource gains WITHOUT mutating the original state.players
+      // We use simPlayers/simTiles for the simulation, but record gains as AIActions
+      // so playNextAIAction can apply them step by step.
+      const matchingTileIds = simTiles
         .filter(t => t.diceNumber === total && t.type !== 'sea')
         .map(t => t.id);
+
+      // Compute gains manually (same logic as distributeResources but on simPlayers)
+      const gains: { player: typeof simPlayers[0]; resource: ResourceType; amount: number }[] = [];
+      simTiles.forEach(tile => {
+        if (tile.diceNumber !== total || tile.type === 'sea') return;
+        tile.structures.forEach(struct => {
+          const player = simPlayers.find(p => p.id === struct.playerId);
+          if (!player) return;
+          const amount = struct.type === 'city' ? 2 : 1;
+          const resource = tile.type as ResourceType;
+          player.resources[resource] += amount; // mutate sim copy only
+          gains.push({ player, resource, amount });
+        });
+      });
 
       // Dice roll action
       aiActions.push({
@@ -608,8 +704,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
             type: 'resource_gain',
             playerId: g.player.id,
             playerName: g.player.name,
-            playerFlag: aiP.flagEmoji,
-            playerColor: aiP.color,
+            playerFlag: g.player.flagEmoji,
+            playerColor: g.player.color,
             resource: g.resource,
             resourceAmount: g.amount,
           });
@@ -625,8 +721,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
         });
       }
 
-      // AI build/upgrade actions
-      const aiActs = aiTurn(aiP, state.tiles);
+      // AI build/upgrade actions (use simTiles for simulation)
+      const aiActs = aiTurn(aiP, simTiles);
       aiActs.forEach(a => {
         logs.push(createLog(a, 'build', aiP.id));
         const isBuild = a.includes('拠点');
@@ -657,18 +753,18 @@ export const useGameStore = create<GameStore>((set, get) => ({
         break;
       }
 
-      idx = (idx + 1) % state.players.length;
+      idx = (idx + 1) % simPlayers.length;
       if (idx === 0) {
         turn++;
         if (turn > state.maxTurns) {
           gameEnded = true;
-          winnerPlayer = [...state.players].sort((a, b) => b.victoryPoints - a.victoryPoints)[0];
+          winnerPlayer = [...simPlayers].sort((a, b) => b.victoryPoints - a.victoryPoints)[0];
           break;
         }
       }
 
       // If we've looped back to a human player, stop
-      if (!state.players[idx].isAI) break;
+      if (!simPlayers[idx].isAI) break;
     }
 
     if (gameEnded && winnerPlayer) {
@@ -688,6 +784,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
         highlightedTileIds: [],
         resourceGains: [],
         showResourceGains: false,
+        finalSimPlayers: simPlayers,
+        finalSimTiles: simTiles,
       });
     } else {
       // After AI turns, it will be the human's turn
@@ -712,6 +810,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
         highlightedTileIds: [],
         resourceGains: [],
         showResourceGains: false,
+        finalSimPlayers: simPlayers,
+        finalSimTiles: simTiles,
       });
     }
   },

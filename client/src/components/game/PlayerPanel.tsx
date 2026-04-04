@@ -2,16 +2,57 @@
  * PlayerPanel - プレイヤー情報パネル
  * Design: 画面下部に国旗・国名・VP・資源を表示
  * 国旗を大きく表示して、どの国のプレイヤーか一目で分かるように
+ * 資源が変化した時にパルスアニメーションを表示
  */
+import { useEffect, useRef, useState } from 'react';
 import { useGameStore } from '@/lib/gameStore';
 import { RESOURCE_INFO, type ResourceType } from '@/lib/gameTypes';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 
 const resourceOrder: ResourceType[] = ['rubber', 'oil', 'gold', 'food'];
 
 export default function PlayerPanel() {
-  const { players, currentPlayerIndex, currentTurn, maxTurns } = useGameStore();
-  const player = players[currentPlayerIndex];
+  const players = useGameStore(s => s.players);
+  const currentPlayerIndex = useGameStore(s => s.currentPlayerIndex);
+  const currentTurn = useGameStore(s => s.currentTurn);
+  const maxTurns = useGameStore(s => s.maxTurns);
+
+  // Find human player (always show human player's resources)
+  const humanPlayer = players.find(p => !p.isAI);
+  const currentPlayer = players[currentPlayerIndex];
+  // During AI turn, show human player's panel; during human turn, show current player
+  const player = humanPlayer || currentPlayer;
+
+  // Track previous resource values for change detection
+  const prevResources = useRef<Record<ResourceType, number>>({
+    rubber: 0, oil: 0, gold: 0, food: 0,
+  });
+  const [changedResources, setChangedResources] = useState<Set<ResourceType>>(new Set());
+
+  useEffect(() => {
+    if (!player) return;
+
+    const changed = new Set<ResourceType>();
+    resourceOrder.forEach(res => {
+      if (player.resources[res] !== prevResources.current[res]) {
+        changed.add(res);
+      }
+    });
+
+    if (changed.size > 0) {
+      setChangedResources(changed);
+      // Clear the animation after a delay
+      const timer = setTimeout(() => {
+        setChangedResources(new Set());
+      }, 1200);
+
+      prevResources.current = { ...player.resources };
+      return () => clearTimeout(timer);
+    }
+
+    prevResources.current = { ...player.resources };
+  }, [player?.resources.rubber, player?.resources.oil, player?.resources.gold, player?.resources.food]);
+
   if (!player) return null;
 
   return (
@@ -70,23 +111,54 @@ export default function PlayerPanel() {
         {resourceOrder.map(res => {
           const info = RESOURCE_INFO[res];
           const count = player.resources[res];
+          const isChanged = changedResources.has(res);
           return (
             <motion.div
               key={res}
-              animate={count > 0 ? {} : { opacity: 0.5 }}
-              className={`${info.bgClass} rounded-xl py-1.5 px-1 text-center shadow-md`}
+              animate={
+                isChanged
+                  ? { scale: [1, 1.15, 1], opacity: 1 }
+                  : count > 0
+                    ? { opacity: 1 }
+                    : { opacity: 0.5 }
+              }
+              transition={isChanged ? { duration: 0.5, ease: 'easeInOut' } : {}}
+              className={`${info.bgClass} rounded-xl py-1.5 px-1 text-center shadow-md relative overflow-hidden`}
               style={{
-                border: `2px solid ${info.color}`,
-                boxShadow: count > 0 ? `0 0 8px ${info.color}40` : 'none',
+                border: `2px solid ${isChanged ? '#fff' : info.color}`,
+                boxShadow: isChanged
+                  ? `0 0 16px ${info.color}80, 0 0 4px #fff`
+                  : count > 0
+                    ? `0 0 8px ${info.color}40`
+                    : 'none',
               }}
             >
+              {/* Flash effect on change */}
+              <AnimatePresence>
+                {isChanged && (
+                  <motion.div
+                    initial={{ opacity: 0.8 }}
+                    animate={{ opacity: 0 }}
+                    exit={{ opacity: 0 }}
+                    transition={{ duration: 0.8 }}
+                    className="absolute inset-0 bg-white/40 rounded-xl"
+                  />
+                )}
+              </AnimatePresence>
+
               <div className="text-white text-xs font-heading flex items-center justify-center gap-0.5">
                 <span>{info.icon}</span>
                 <span>{info.name}</span>
               </div>
-              <div className="font-score text-2xl font-bold text-white drop-shadow-md">
+              <motion.div
+                key={`${res}-${count}`}
+                initial={isChanged ? { scale: 1.5, color: '#FFD700' } : {}}
+                animate={{ scale: 1, color: '#ffffff' }}
+                transition={{ duration: 0.4 }}
+                className="font-score text-2xl font-bold text-white drop-shadow-md"
+              >
                 {count}
-              </div>
+              </motion.div>
             </motion.div>
           );
         })}

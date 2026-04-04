@@ -15,6 +15,7 @@ import ActionMenu from '@/components/game/ActionMenu';
 import EventPopup from '@/components/game/EventPopup';
 import GameLog from '@/components/game/GameLog';
 import AITurnOverlay from '@/components/game/AITurnOverlay';
+import ResourcePopup from '@/components/game/ResourcePopup';
 import { useGameStore } from '@/lib/gameStore';
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -132,6 +133,9 @@ export default function GameScreen() {
 
       {/* AI Turn Overlay - staged animation */}
       <AITurnOverlay />
+
+      {/* Resource Gain Popup */}
+      <ResourcePopup />
 
       {/* Event Popup Overlay */}
       <EventPopup />
