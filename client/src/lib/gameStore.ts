@@ -20,6 +20,25 @@ export interface ResourceGain {
   tileId: number;
 }
 
+// AI Action for staged animation
+export interface AIAction {
+  type: 'turn_start' | 'dice_roll' | 'resource_gain' | 'no_resource' | 'build' | 'upgrade' | 'turn_end';
+  playerId: string;
+  playerName: string;
+  playerFlag: string;
+  playerColor: string;
+  // dice
+  dice?: [number, number];
+  diceTotal?: number;
+  // resource
+  resource?: ResourceType;
+  resourceAmount?: number;
+  // build
+  buildType?: string;
+  // highlighted tiles
+  highlightTileIds?: number[];
+}
+
 interface GameStore extends GameState {
   // Navigation
   screen: 'title' | 'create' | 'join' | 'rules' | 'game' | 'result';
@@ -31,6 +50,11 @@ interface GameStore extends GameState {
   highlightedTileIds: number[];
   resourceGains: ResourceGain[];
   showResourceGains: boolean;
+
+  // AI Turn Animation
+  aiActionQueue: AIAction[];
+  currentAIAction: AIAction | null;
+  isPlayingAI: boolean;
 
   // Game Setup
   initGame: (playerName: string, playerCount: number, difficulty: Difficulty) => void;
@@ -50,6 +74,10 @@ interface GameStore extends GameState {
   setBuildMode: (mode: StructureType | null) => void;
   clearSelection: () => void;
   dismissResourceGains: () => void;
+
+  // AI animation actions
+  playNextAIAction: () => void;
+  clearAIAction: () => void;
 
   // Helpers
   getCurrentPlayer: () => Player | undefined;
@@ -79,21 +107,24 @@ export const useGameStore = create<GameStore>((set, get) => ({
   resourceGains: [],
   showResourceGains: false,
 
+  // AI animation state
+  aiActionQueue: [],
+  currentAIAction: null,
+  isPlayingAI: false,
+
   setScreen: (screen) => set({ screen }),
 
   // Tile interaction actions
   selectTile: (tileId) => {
     const state = get();
     const player = state.players[state.currentPlayerIndex];
-    if (!player) return;
+    if (!player || state.isPlayingAI) return;
 
-    // If in build mode, try to build on this tile
     if (state.buildMode && state.phase === 'action') {
       const tile = state.tiles.find(t => t.id === tileId);
       if (!tile) return;
 
       if (state.buildMode === 'city') {
-        // Upgrade existing settlement on this tile
         const hasSettlement = tile.structures.some(s => s.playerId === player.id && s.type === 'settlement');
         if (hasSettlement) {
           get().doUpgrade(tileId);
@@ -103,7 +134,6 @@ export const useGameStore = create<GameStore>((set, get) => ({
         get().doBuild(tileId, 'ship');
         set({ buildMode: null, selectedTileId: null, highlightedTileIds: [] });
       } else {
-        // Build settlement
         const alreadyHas = tile.structures.some(s => s.playerId === player.id);
         if (!alreadyHas && tile.type !== 'sea') {
           get().doBuild(tileId, 'settlement');
@@ -113,7 +143,6 @@ export const useGameStore = create<GameStore>((set, get) => ({
       return;
     }
 
-    // Just select/deselect
     set({ selectedTileId: state.selectedTileId === tileId ? null : tileId });
   },
 
@@ -127,7 +156,6 @@ export const useGameStore = create<GameStore>((set, get) => ({
       return;
     }
 
-    // Calculate which tiles can be built on
     let buildableTileIds: number[] = [];
     if (mode === 'settlement') {
       buildableTileIds = state.tiles
@@ -141,7 +169,6 @@ export const useGameStore = create<GameStore>((set, get) => ({
       buildableTileIds = state.tiles
         .filter(t => t.type === 'sea' && !t.structures.some(s => s.playerId === player.id))
         .map(t => t.id);
-      // If no sea tiles available, allow any tile
       if (buildableTileIds.length === 0) {
         buildableTileIds = state.tiles
           .filter(t => !t.structures.some(s => s.playerId === player.id))
@@ -156,25 +183,48 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
   dismissResourceGains: () => set({ showResourceGains: false, resourceGains: [] }),
 
+  // AI animation actions
+  playNextAIAction: () => {
+    const state = get();
+    const queue = [...state.aiActionQueue];
+    if (queue.length === 0) {
+      // All AI actions done, return to human player
+      set({
+        currentAIAction: null,
+        isPlayingAI: false,
+        aiActionQueue: [],
+        highlightedTileIds: [],
+      });
+      return;
+    }
+
+    const next = queue.shift()!;
+    set({
+      currentAIAction: next,
+      aiActionQueue: queue,
+      highlightedTileIds: next.highlightTileIds || [],
+    });
+  },
+
+  clearAIAction: () => {
+    set({ currentAIAction: null, highlightedTileIds: [] });
+  },
+
   initGame: (playerName, playerCount, difficulty) => {
     const tiles = generateMap();
     const players: Player[] = [];
 
-    // Create human player
     players.push(createPlayer(playerName, 0, false));
 
-    // Create AI players
     const aiNames = ['イギリス', 'フランス', 'ドイツ', 'アメリカ', 'イタリア'];
     for (let i = 1; i < playerCount; i++) {
       players.push(createPlayer(aiNames[i - 1], i, true));
     }
 
-    // Place initial settlements for each player
     const availableTiles = tiles.filter(t => t.type !== 'sea');
     const shuffled = [...availableTiles].sort(() => Math.random() - 0.5);
     
     players.forEach((player, idx) => {
-      // Each player gets 2 initial settlements
       for (let s = 0; s < 2; s++) {
         const tileIdx = idx * 2 + s;
         if (tileIdx < shuffled.length) {
@@ -210,6 +260,9 @@ export const useGameStore = create<GameStore>((set, get) => ({
       highlightedTileIds: [],
       resourceGains: [],
       showResourceGains: false,
+      aiActionQueue: [],
+      currentAIAction: null,
+      isPlayingAI: false,
     });
   },
 
@@ -221,13 +274,11 @@ export const useGameStore = create<GameStore>((set, get) => ({
     const dice = rollDice();
     const total = dice[0] + dice[1];
 
-    // Distribute resources
     const gains = distributeResources(state.tiles, state.players, total);
     const logs: GameLogEntry[] = [
       createLog(`${player.name}がサイコロを振った！ 🎲 ${dice[0]} + ${dice[1]} = ${total}`, 'info', player.id),
     ];
 
-    // Build resource gain notifications
     const resourceGains: ResourceGain[] = [];
     gains.forEach(g => {
       const resName = g.resource === 'rubber' ? 'ゴム' : g.resource === 'oil' ? '石油' : g.resource === 'gold' ? '金' : '食料';
@@ -236,7 +287,6 @@ export const useGameStore = create<GameStore>((set, get) => ({
         'resource',
         g.player.id
       ));
-      // Find the tile that produced this resource
       const producingTile = state.tiles.find(t => 
         t.diceNumber === total && t.type === g.resource && 
         t.structures.some(s => s.playerId === g.player.id)
@@ -249,12 +299,10 @@ export const useGameStore = create<GameStore>((set, get) => ({
       });
     });
 
-    // Highlight tiles that match the dice roll
     const matchingTileIds = state.tiles
       .filter(t => t.diceNumber === total && t.type !== 'sea')
       .map(t => t.id);
 
-    // Check for event
     let event: EventCard | null = null;
     if (shouldTriggerEvent(player, total, state.difficulty)) {
       event = drawEventCard();
@@ -272,10 +320,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
       showResourceGains: gains.length > 0,
     });
 
-    // Clear highlights after 2.5 seconds
     setTimeout(() => {
       const current = get();
-      // Only clear if still showing the same dice result
       if (current.diceResult && current.diceResult[0] === dice[0] && current.diceResult[1] === dice[1]) {
         set({ highlightedTileIds: [] });
       }
@@ -311,7 +357,6 @@ export const useGameStore = create<GameStore>((set, get) => ({
       player.id
     );
 
-    // Check if we need more selections
     const remaining = state.currentEvent.effectValue - 1;
     if (remaining > 0) {
       set({
@@ -341,7 +386,6 @@ export const useGameStore = create<GameStore>((set, get) => ({
       const typeName = type === 'settlement' ? '拠点' : type === 'city' ? '都市' : '船';
       const log = createLog(`${player.name}が${typeName}を建設した！`, 'build', player.id);
 
-      // Check win
       if (checkWin(player, state.difficulty)) {
         set({
           winner: player,
@@ -409,7 +453,6 @@ export const useGameStore = create<GameStore>((set, get) => ({
     const player = state.players[state.currentPlayerIndex];
     if (!player || state.phase !== 'action') return;
 
-    // 3:1 trade ratio
     if (player.resources[give] < 3) return;
 
     player.resources[give] -= 3;
@@ -436,10 +479,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
     const tile = state.tiles.find(t => t.id === tileId);
     if (!tile || tile.type === 'sea') return;
 
-    // Check if player has ship and can afford expand cost
     if (!canAfford(player, { food: 1, gold: 1 })) return;
 
-    // Pay cost and build settlement
     if (buildStructure(player, tile, 'settlement')) {
       const log = createLog(`${player.name}が海外に進出した！`, 'build', player.id);
 
@@ -466,7 +507,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
   doEndTurn: () => {
     const state = get();
     const currentPlayer = state.players[state.currentPlayerIndex];
-    if (!currentPlayer) return;
+    if (!currentPlayer || state.isPlayingAI) return;
 
     let nextIndex = (state.currentPlayerIndex + 1) % state.players.length;
     let nextTurn = state.currentTurn;
@@ -475,7 +516,6 @@ export const useGameStore = create<GameStore>((set, get) => ({
       nextTurn++;
     }
 
-    // Check if game over by turns
     if (nextTurn > state.maxTurns) {
       const winner = [...state.players].sort((a, b) => b.victoryPoints - a.victoryPoints)[0];
       set({
@@ -487,96 +527,136 @@ export const useGameStore = create<GameStore>((set, get) => ({
       return;
     }
 
-    const nextPlayer = state.players[nextIndex];
     const logs: GameLogEntry[] = [
       createLog(`${currentPlayer.name}のターン終了`, 'info', currentPlayer.id),
     ];
 
-    // If next player is AI, auto-play
-    if (nextPlayer.isAI) {
+    // Collect all AI players' actions into a queue for staged animation
+    const aiActions: AIAction[] = [];
+    let idx = nextIndex;
+    let turn = nextTurn;
+    let gameEnded = false;
+    let winnerPlayer: Player | null = null;
+
+    while (state.players[idx].isAI) {
+      const aiP = state.players[idx];
+
+      // Turn start announcement
+      aiActions.push({
+        type: 'turn_start',
+        playerId: aiP.id,
+        playerName: aiP.countryName,
+        playerFlag: aiP.flagEmoji,
+        playerColor: aiP.color,
+      });
+
       // AI rolls dice
       const dice = rollDice();
       const total = dice[0] + dice[1];
       const gains = distributeResources(state.tiles, state.players, total);
 
-      logs.push(createLog(`${nextPlayer.name}がサイコロを振った！ 🎲 ${dice[0]} + ${dice[1]} = ${total}`, 'info', nextPlayer.id));
-      gains.forEach(g => {
-        const resName = g.resource === 'rubber' ? 'ゴム' : g.resource === 'oil' ? '石油' : g.resource === 'gold' ? '金' : '食料';
-        logs.push(createLog(`${g.player.name}が${resName}を${g.amount}つゲット！`, 'resource', g.player.id));
+      const matchingTileIds = state.tiles
+        .filter(t => t.diceNumber === total && t.type !== 'sea')
+        .map(t => t.id);
+
+      // Dice roll action
+      aiActions.push({
+        type: 'dice_roll',
+        playerId: aiP.id,
+        playerName: aiP.countryName,
+        playerFlag: aiP.flagEmoji,
+        playerColor: aiP.color,
+        dice,
+        diceTotal: total,
+        highlightTileIds: matchingTileIds,
       });
 
-      // AI actions
-      const aiActions = aiTurn(nextPlayer, state.tiles);
-      aiActions.forEach(a => logs.push(createLog(a, 'build', nextPlayer.id)));
+      logs.push(createLog(`${aiP.name}がサイコロを振った！ 🎲 ${dice[0]} + ${dice[1]} = ${total}`, 'info', aiP.id));
+
+      // Resource gains
+      if (gains.length > 0) {
+        gains.forEach(g => {
+          const resName = g.resource === 'rubber' ? 'ゴム' : g.resource === 'oil' ? '石油' : g.resource === 'gold' ? '金' : '食料';
+          logs.push(createLog(`${g.player.name}が${resName}を${g.amount}つゲット！`, 'resource', g.player.id));
+          aiActions.push({
+            type: 'resource_gain',
+            playerId: g.player.id,
+            playerName: g.player.name,
+            playerFlag: aiP.flagEmoji,
+            playerColor: aiP.color,
+            resource: g.resource,
+            resourceAmount: g.amount,
+          });
+        });
+      } else {
+        aiActions.push({
+          type: 'no_resource',
+          playerId: aiP.id,
+          playerName: aiP.countryName,
+          playerFlag: aiP.flagEmoji,
+          playerColor: aiP.color,
+          diceTotal: total,
+        });
+      }
+
+      // AI build/upgrade actions
+      const aiActs = aiTurn(aiP, state.tiles);
+      aiActs.forEach(a => {
+        logs.push(createLog(a, 'build', aiP.id));
+        const isBuild = a.includes('拠点');
+        const isUpgrade = a.includes('都市');
+        aiActions.push({
+          type: isUpgrade ? 'upgrade' : 'build',
+          playerId: aiP.id,
+          playerName: aiP.countryName,
+          playerFlag: aiP.flagEmoji,
+          playerColor: aiP.color,
+          buildType: isBuild ? '拠点' : isUpgrade ? '都市' : '船',
+        });
+      });
+
+      // Turn end
+      aiActions.push({
+        type: 'turn_end',
+        playerId: aiP.id,
+        playerName: aiP.countryName,
+        playerFlag: aiP.flagEmoji,
+        playerColor: aiP.color,
+      });
 
       // Check AI win
-      if (checkWin(nextPlayer, state.difficulty)) {
-        set({
-          winner: nextPlayer,
-          phase: 'finished',
-          screen: 'result',
-          currentPlayerIndex: nextIndex,
-          currentTurn: nextTurn,
-          diceResult: dice,
-          gameLog: [...state.gameLog, ...logs, createLog(`${nextPlayer.name}の勝利！`, 'system')],
-          players: [...state.players],
-          tiles: [...state.tiles],
-        });
-        return;
+      if (checkWin(aiP, state.difficulty)) {
+        gameEnded = true;
+        winnerPlayer = aiP;
+        break;
       }
 
-      // Move to next human player
-      let humanIndex = (nextIndex + 1) % state.players.length;
-      let humanTurn = nextTurn;
-      
-      // Skip through remaining AI players
-      while (state.players[humanIndex].isAI && humanIndex !== 0) {
-        const aiP = state.players[humanIndex];
-        const aiDice = rollDice();
-        const aiTotal = aiDice[0] + aiDice[1];
-        distributeResources(state.tiles, state.players, aiTotal);
-        logs.push(createLog(`${aiP.name}がサイコロを振った！ 🎲 ${aiDice[0]} + ${aiDice[1]} = ${aiTotal}`, 'info', aiP.id));
-        
-        const aiActs = aiTurn(aiP, state.tiles);
-        aiActs.forEach(a => logs.push(createLog(a, 'build', aiP.id)));
-
-        if (checkWin(aiP, state.difficulty)) {
-          set({
-            winner: aiP,
-            phase: 'finished',
-            screen: 'result',
-            gameLog: [...state.gameLog, ...logs, createLog(`${aiP.name}の勝利！`, 'system')],
-            players: [...state.players],
-            tiles: [...state.tiles],
-          });
-          return;
-        }
-
-        humanIndex = (humanIndex + 1) % state.players.length;
-      }
-
-      if (humanIndex === 0) {
-        humanTurn = nextTurn + 1;
-        if (humanTurn > state.maxTurns) {
-          const winner = [...state.players].sort((a, b) => b.victoryPoints - a.victoryPoints)[0];
-          set({
-            winner,
-            phase: 'finished',
-            screen: 'result',
-            gameLog: [...state.gameLog, ...logs, createLog(`ゲーム終了！${winner.name}の勝利！`, 'system')],
-          });
-          return;
+      idx = (idx + 1) % state.players.length;
+      if (idx === 0) {
+        turn++;
+        if (turn > state.maxTurns) {
+          gameEnded = true;
+          winnerPlayer = [...state.players].sort((a, b) => b.victoryPoints - a.victoryPoints)[0];
+          break;
         }
       }
 
+      // If we've looped back to a human player, stop
+      if (!state.players[idx].isAI) break;
+    }
+
+    if (gameEnded && winnerPlayer) {
+      logs.push(createLog(`${winnerPlayer.name}の勝利！`, 'system'));
+      // Still play the AI animation, then show result
       set({
-        currentPlayerIndex: humanIndex,
-        currentTurn: humanTurn,
-        phase: 'rolling',
-        diceResult: null,
-        gameLog: [...state.gameLog, ...logs, createLog(`${state.players[humanIndex].name}のターン！サイコロを振ろう！`, 'system')],
+        phase: 'ai_turn',
+        isPlayingAI: true,
+        aiActionQueue: aiActions,
+        currentAIAction: null,
+        gameLog: [...state.gameLog, ...logs],
         players: [...state.players],
         tiles: [...state.tiles],
+        winner: winnerPlayer,
         selectedTileId: null,
         buildMode: null,
         highlightedTileIds: [],
@@ -584,13 +664,23 @@ export const useGameStore = create<GameStore>((set, get) => ({
         showResourceGains: false,
       });
     } else {
+      // After AI turns, it will be the human's turn
+      const humanIndex = idx;
+      const humanTurn = turn;
+
+      logs.push(createLog(`${state.players[humanIndex].name}のターン！サイコロを振ろう！`, 'system'));
+
       set({
-        currentPlayerIndex: nextIndex,
-        currentTurn: nextTurn,
-        phase: 'rolling',
+        phase: 'ai_turn',
+        isPlayingAI: true,
+        aiActionQueue: aiActions,
+        currentAIAction: null,
+        currentPlayerIndex: humanIndex,
+        currentTurn: humanTurn,
         diceResult: null,
         gameLog: [...state.gameLog, ...logs],
         players: [...state.players],
+        tiles: [...state.tiles],
         selectedTileId: null,
         buildMode: null,
         highlightedTileIds: [],

@@ -5,6 +5,7 @@
  * - 上部: 対戦相手情報バー
  * - 中央: ヘックスマップ + サイコロ（flex-1で残りスペースを使用）
  * - 下部: ゲームログ + プレイヤー情報 + アクションメニュー
+ * - オーバーレイ: AIターン演出 + イベントポップアップ
  */
 import HexMap from '@/components/game/HexMap';
 import OpponentBar from '@/components/game/OpponentBar';
@@ -13,6 +14,7 @@ import DiceRoller from '@/components/game/DiceRoller';
 import ActionMenu from '@/components/game/ActionMenu';
 import EventPopup from '@/components/game/EventPopup';
 import GameLog from '@/components/game/GameLog';
+import AITurnOverlay from '@/components/game/AITurnOverlay';
 import { useGameStore } from '@/lib/gameStore';
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -58,7 +60,7 @@ function TileHelpTooltip({ onClose }: { onClose: () => void }) {
 }
 
 export default function GameScreen() {
-  const { phase } = useGameStore();
+  const { phase, isPlayingAI, currentAIAction } = useGameStore();
   const [showHelp, setShowHelp] = useState(false);
 
   return (
@@ -90,10 +92,29 @@ export default function GameScreen() {
           </AnimatePresence>
         </div>
 
+        {/* AI Turn Banner - shows which AI is playing */}
+        <AnimatePresence>
+          {isPlayingAI && currentAIAction && (
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              exit={{ opacity: 0, height: 0 }}
+              className="shrink-0 mx-2"
+            >
+              <div
+                className="text-center py-1.5 px-3 rounded-lg text-white text-sm font-heading font-bold shadow-lg"
+                style={{ backgroundColor: currentAIAction.playerColor + 'dd' }}
+              >
+                {currentAIAction.playerFlag} {currentAIAction.playerName}が行動中…
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
         {/* Middle: Map + Dice (takes remaining space) */}
         <div className="flex-1 flex flex-col items-center justify-center gap-1 px-2 overflow-hidden">
           <HexMap />
-          <DiceRoller />
+          {!isPlayingAI && <DiceRoller />}
         </div>
 
         {/* Bottom Section: Log + Player + Actions */}
@@ -104,10 +125,13 @@ export default function GameScreen() {
           {/* Player Panel */}
           <PlayerPanel />
 
-          {/* Action Menu */}
-          <ActionMenu />
+          {/* Action Menu - hidden during AI turns */}
+          {!isPlayingAI && <ActionMenu />}
         </div>
       </div>
+
+      {/* AI Turn Overlay - staged animation */}
+      <AITurnOverlay />
 
       {/* Event Popup Overlay */}
       <EventPopup />

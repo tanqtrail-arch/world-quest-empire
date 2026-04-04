@@ -79,6 +79,7 @@ export type GamePhase =
   | 'trading'
   | 'expanding'
   | 'event'
+  | 'ai_turn'
   | 'finished';
 
 // --- Difficulty ---
