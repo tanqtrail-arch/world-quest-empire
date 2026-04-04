@@ -10,7 +10,7 @@ import {
   buildStructure, upgradeToCity, drawEventCard, shouldTriggerEvent,
   applyEvent, checkWin, createLog, aiTurn, canAfford, genId,
 } from './gameLogic';
-import { BUILD_COSTS } from './gameTypes';
+import { BUILD_COSTS, PLAYER_COLORS } from './gameTypes';
 
 // Resource gain notification
 export interface ResourceGain {
@@ -50,6 +50,7 @@ interface GameStore extends GameState {
   highlightedTileIds: number[];
   resourceGains: ResourceGain[];
   showResourceGains: boolean;
+  pendingEvent: EventCard | null;
 
   // AI Turn Animation
   aiActionQueue: AIAction[];
@@ -57,7 +58,7 @@ interface GameStore extends GameState {
   isPlayingAI: boolean;
 
   // Game Setup
-  initGame: (playerName: string, playerCount: number, difficulty: Difficulty) => void;
+  initGame: (playerName: string, playerCount: number, difficulty: Difficulty, selectedCountryIndex?: number) => void;
 
   // Game Actions
   doRollDice: () => void;
@@ -106,6 +107,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
   highlightedTileIds: [],
   resourceGains: [],
   showResourceGains: false,
+  pendingEvent: null as EventCard | null,
 
   // AI animation state
   aiActionQueue: [],
@@ -181,7 +183,22 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
   clearSelection: () => set({ selectedTileId: null, buildMode: null, highlightedTileIds: [] }),
 
-  dismissResourceGains: () => set({ showResourceGains: false, resourceGains: [] }),
+  dismissResourceGains: () => {
+    const state = get();
+    if (state.pendingEvent) {
+      // Show the pending event after DiceResultZoom is dismissed
+      set({
+        showResourceGains: false,
+        resourceGains: [],
+        highlightedTileIds: [],
+        phase: 'event',
+        currentEvent: state.pendingEvent,
+        pendingEvent: null,
+      });
+    } else {
+      set({ showResourceGains: false, resourceGains: [], highlightedTileIds: [] });
+    }
+  },
 
   // AI animation actions
   playNextAIAction: () => {
@@ -210,15 +227,17 @@ export const useGameStore = create<GameStore>((set, get) => ({
     set({ currentAIAction: null, highlightedTileIds: [] });
   },
 
-  initGame: (playerName, playerCount, difficulty) => {
+  initGame: (playerName, playerCount, difficulty, selectedCountryIndex = 0) => {
     const tiles = generateMap();
     const players: Player[] = [];
 
-    players.push(createPlayer(playerName, 0, false));
+    players.push(createPlayer(playerName, selectedCountryIndex, false));
 
-    const aiNames = ['イギリス', 'フランス', 'ドイツ', 'アメリカ', 'イタリア'];
+    // AI players use remaining country indices
+    const allIndices = [0, 1, 2, 3, 4, 5].filter(i => i !== selectedCountryIndex);
     for (let i = 1; i < playerCount; i++) {
-      players.push(createPlayer(aiNames[i - 1], i, true));
+      const aiIndex = allIndices[(i - 1) % allIndices.length];
+      players.push(createPlayer(PLAYER_COLORS[aiIndex]?.countryName || `AI${i}`, aiIndex, true));
     }
 
     const availableTiles = tiles.filter(t => t.type !== 'sea');
@@ -260,6 +279,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
       highlightedTileIds: [],
       resourceGains: [],
       showResourceGains: false,
+      pendingEvent: null,
       aiActionQueue: [],
       currentAIAction: null,
       isPlayingAI: false,
@@ -309,23 +329,29 @@ export const useGameStore = create<GameStore>((set, get) => ({
       logs.push(createLog(`イベント発生！「${event.title}」`, 'event', player.id));
     }
 
+    // Always show DiceResultZoom first, then event popup after dismissal
     set({
       diceResult: dice,
-      phase: event ? 'event' : 'action',
-      currentEvent: event,
+      phase: 'action', // Always start in action phase to show DiceResultZoom
+      currentEvent: null, // Don't show event yet, will be shown after DiceResultZoom dismissal
+      pendingEvent: event, // Store event for later
       gameLog: [...state.gameLog, ...logs],
       players: [...state.players],
       highlightedTileIds: matchingTileIds,
       resourceGains,
-      showResourceGains: gains.length > 0,
+      showResourceGains: true,
     });
 
+    // Keep highlights visible longer so DiceResultZoom can show them
     setTimeout(() => {
       const current = get();
       if (current.diceResult && current.diceResult[0] === dice[0] && current.diceResult[1] === dice[1]) {
-        set({ highlightedTileIds: [] });
+        // Only clear highlights if DiceResultZoom has been dismissed
+        if (!current.showResourceGains) {
+          set({ highlightedTileIds: [] });
+        }
       }
-    }, 2500);
+    }, 5000);
   },
 
   resolveEvent: () => {

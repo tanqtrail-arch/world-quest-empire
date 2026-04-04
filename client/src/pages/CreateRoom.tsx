@@ -2,13 +2,14 @@
  * CreateRoom - ルーム作成画面
  * Design: 木目パネル上にフォーム
  * - プレイヤー名入力
+ * - 国旗選択（🇯🇵日本がデフォルト）
  * - プレイ人数選択
  * - 難易度選択
  * - ゲーム開始ボタン
  */
 import { useState } from 'react';
 import { useGameStore } from '@/lib/gameStore';
-import type { Difficulty } from '@/lib/gameTypes';
+import { PLAYER_COLORS, type Difficulty } from '@/lib/gameTypes';
 import { motion } from 'framer-motion';
 import { ArrowLeft } from 'lucide-react';
 
@@ -17,12 +18,13 @@ const WOOD_BG = 'https://d2xsxph8kpxj0f.cloudfront.net/310519663286960690/RthryR
 export default function CreateRoom() {
   const { setScreen, initGame } = useGameStore();
   const [playerName, setPlayerName] = useState('');
+  const [selectedCountryIndex, setSelectedCountryIndex] = useState(0); // Default: Japan
   const [playerCount, setPlayerCount] = useState(3);
   const [difficulty, setDifficulty] = useState<Difficulty>('normal');
 
   const handleStart = () => {
     const name = playerName.trim() || 'プレイヤー1';
-    initGame(name, playerCount, difficulty);
+    initGame(name, playerCount, difficulty, selectedCountryIndex);
   };
 
   const difficultyOptions: { value: Difficulty; label: string; desc: string; color: string }[] = [
@@ -44,24 +46,24 @@ export default function CreateRoom() {
         initial={{ scale: 0.9, opacity: 0 }}
         animate={{ scale: 1, opacity: 1 }}
         transition={{ duration: 0.4 }}
-        className="parchment rounded-2xl p-6 w-full max-w-md"
+        className="parchment rounded-2xl p-5 w-full max-w-md"
       >
         {/* Back button */}
         <button
           onClick={() => setScreen('title')}
-          className="flex items-center gap-1 text-amber-800 font-heading font-bold mb-4 hover:text-amber-600 transition-colors"
+          className="flex items-center gap-1 text-amber-800 font-heading font-bold mb-3 hover:text-amber-600 transition-colors"
         >
           <ArrowLeft size={20} />
           もどる
         </button>
 
-        <h2 className="font-heading text-2xl font-bold text-amber-900 text-center mb-6">
+        <h2 className="font-heading text-2xl font-bold text-amber-900 text-center mb-4">
           🎮 ゲームをつくる
         </h2>
 
         {/* Player Name */}
-        <div className="mb-5">
-          <label className="block font-heading font-bold text-amber-800 mb-2 text-lg">
+        <div className="mb-4">
+          <label className="block font-heading font-bold text-amber-800 mb-1.5 text-base">
             なまえ
           </label>
           <input
@@ -74,9 +76,40 @@ export default function CreateRoom() {
           />
         </div>
 
+        {/* Country Selection */}
+        <div className="mb-4">
+          <label className="block font-heading font-bold text-amber-800 mb-1.5 text-base">
+            🏴 くに
+          </label>
+          <div className="grid grid-cols-3 gap-2">
+            {PLAYER_COLORS.map((country, i) => (
+              <button
+                key={i}
+                onClick={() => setSelectedCountryIndex(i)}
+                className={`flex flex-col items-center py-2.5 px-2 rounded-xl font-heading font-bold transition-all ${
+                  selectedCountryIndex === i
+                    ? 'text-white shadow-lg scale-105 border-3 ring-2 ring-offset-1'
+                    : 'bg-white text-amber-800 border-3 border-amber-300 hover:border-amber-500'
+                }`}
+                style={
+                  selectedCountryIndex === i
+                    ? {
+                        backgroundColor: country.color,
+                        borderColor: country.color,
+                      }
+                    : undefined
+                }
+              >
+                <span className="text-2xl mb-0.5">{country.flagEmoji}</span>
+                <span className="text-xs">{country.countryName}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+
         {/* Player Count */}
-        <div className="mb-5">
-          <label className="block font-heading font-bold text-amber-800 mb-2 text-lg">
+        <div className="mb-4">
+          <label className="block font-heading font-bold text-amber-800 mb-1.5 text-base">
             にんずう
           </label>
           <div className="flex gap-2">
@@ -84,7 +117,7 @@ export default function CreateRoom() {
               <button
                 key={n}
                 onClick={() => setPlayerCount(n)}
-                className={`flex-1 py-3 rounded-xl font-heading font-bold text-xl transition-all ${
+                className={`flex-1 py-2.5 rounded-xl font-heading font-bold text-xl transition-all ${
                   playerCount === n
                     ? 'bg-amber-500 text-white shadow-lg scale-105 border-3 border-amber-700'
                     : 'bg-white text-amber-800 border-3 border-amber-300 hover:border-amber-500'
@@ -97,8 +130,8 @@ export default function CreateRoom() {
         </div>
 
         {/* Difficulty */}
-        <div className="mb-6">
-          <label className="block font-heading font-bold text-amber-800 mb-2 text-lg">
+        <div className="mb-5">
+          <label className="block font-heading font-bold text-amber-800 mb-1.5 text-base">
             むずかしさ
           </label>
           <div className="flex gap-2">
@@ -106,7 +139,7 @@ export default function CreateRoom() {
               <button
                 key={opt.value}
                 onClick={() => setDifficulty(opt.value)}
-                className={`flex-1 py-3 px-2 rounded-xl font-heading font-bold transition-all ${
+                className={`flex-1 py-2.5 px-2 rounded-xl font-heading font-bold transition-all ${
                   difficulty === opt.value
                     ? 'text-white shadow-lg scale-105 border-3'
                     : 'bg-white text-amber-800 border-3 border-amber-300 hover:border-amber-500'

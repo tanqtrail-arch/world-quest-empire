@@ -1,6 +1,6 @@
 /*
  * OpponentBar - 対戦相手情報バー
- * Design: 画面上部に他プレイヤーの簡易情報を表示
+ * Design: 画面上部に他プレイヤーの国旗・VP・資源を表示
  * AIターン中は行動中のプレイヤーをハイライト表示
  */
 import { useGameStore } from '@/lib/gameStore';
@@ -23,17 +23,26 @@ export default function OpponentBar() {
             key={opp.id}
             animate={isActive ? {
               scale: [1, 1.05, 1],
-              boxShadow: [`0 0 0px ${opp.color}`, `0 0 12px ${opp.color}`, `0 0 0px ${opp.color}`],
+              boxShadow: [`0 0 0px ${opp.color}`, `0 0 16px ${opp.color}`, `0 0 0px ${opp.color}`],
             } : { scale: 1 }}
             transition={isActive ? { duration: 1.5, repeat: Infinity } : {}}
-            className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 shrink-0 transition-all duration-300"
+            className="flex items-center gap-1.5 rounded-xl px-2 py-1.5 shrink-0 transition-all duration-300"
             style={{
-              background: isActive ? `${opp.color}33` : 'rgba(0,0,0,0.5)',
+              background: isActive ? `${opp.color}44` : 'rgba(0,0,0,0.55)',
               backdropFilter: 'blur(4px)',
               border: `2px solid ${isActive ? opp.color : opp.color + '88'}`,
             }}
           >
-            <span className="text-base">{opp.flagEmoji}</span>
+            {/* Flag */}
+            <div
+              className="w-9 h-9 rounded-lg flex items-center justify-center text-xl shrink-0"
+              style={{
+                background: `${opp.color}33`,
+                border: `1.5px solid ${opp.color}`,
+              }}
+            >
+              {opp.flagEmoji}
+            </div>
             <div className="text-white text-xs font-heading leading-tight">
               <div className="font-bold flex items-center gap-1">
                 {opp.countryName}
@@ -50,7 +59,7 @@ export default function OpponentBar() {
               <div className="flex items-center gap-1">
                 <span className="text-yellow-400">★</span>
                 <span className="font-score font-bold">{opp.victoryPoints}</span>
-                <span className="text-white/60 ml-1">
+                <span className="text-white/60 ml-0.5 text-[10px]">
                   🌿{opp.resources.rubber} 🛢️{opp.resources.oil} 💰{opp.resources.gold} 🌾{opp.resources.food}
                 </span>
               </div>

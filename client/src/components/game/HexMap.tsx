@@ -1,290 +1,116 @@
 /*
- * HexMap - 六角形マップコンポーネント
- * Design: カタン風の3-4-5-4-3ヘックスグリッド
- * - タイルを大きく表示し、間隔を広げて重なりを解消
- * - 資源アイコンと名前を明確に表示
- * - タイルタップでズームアップ表示
- * - サイコロ出目に対応するタイルをハイライト
+ * HexMap - ヘックスマップコンポーネント
+ * Design: スマホ最適化、大きなタイル、国旗マーカー、サイコロ出目ズームアップ
+ * - タイルに国旗🇯🇵🇬🇧🇫🇷を立てて所有者を明確に
+ * - スマホでスクロール可能な大きなマップ
+ * - サイコロ出目時に該当タイルをズームアップ表示
  */
 import { useGameStore } from '@/lib/gameStore';
-import { RESOURCE_INFO, TILE_INFO, type GameTile, type TileType, type ResourceType } from '@/lib/gameTypes';
+import { TILE_INFO, RESOURCE_INFO, type ResourceType, type TileType, type GameTile, type EventCard } from '@/lib/gameTypes';
 import { motion, AnimatePresence } from 'framer-motion';
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 
-const HEX_SIZE = 38;
-const HEX_GAP = 4;
+// --- Hex geometry ---
+const HEX_SIZE = 52;
+const HEX_GAP = 6;
 const HEX_W = HEX_SIZE * 2;
 const HEX_H = Math.sqrt(3) * HEX_SIZE;
-
 const ROWS = [3, 4, 5, 4, 3];
 
 function getHexPoints(cx: number, cy: number, size: number): string {
-  const points: string[] = [];
+  const pts: string[] = [];
   for (let i = 0; i < 6; i++) {
     const angle = (Math.PI / 3) * i - Math.PI / 6;
-    const x = cx + size * Math.cos(angle);
-    const y = cy + size * Math.sin(angle);
-    points.push(`${x},${y}`);
+    pts.push(`${cx + size * Math.cos(angle)},${cy + size * Math.sin(angle)}`);
   }
-  return points.join(' ');
+  return pts.join(' ');
 }
 
-// Zoomed tile detail card
-function TileZoomCard({ tile, onClose, playerColors }: {
+// --- Tile Zoom Card (tap to see details) ---
+function TileZoomCard({ tile, onClose, playerColors, playerFlags }: {
   tile: GameTile;
   onClose: () => void;
   playerColors: Record<string, string>;
+  playerFlags: Record<string, string>;
 }) {
-  const info = tile.type !== 'sea' ? RESOURCE_INFO[tile.type as ResourceType] : null;
   const tileInfo = TILE_INFO[tile.type];
-
-  return (
-    <motion.div
-      initial={{ opacity: 0, scale: 0.5 }}
-      animate={{ opacity: 1, scale: 1 }}
-      exit={{ opacity: 0, scale: 0.5 }}
-      transition={{ type: 'spring', stiffness: 300, damping: 25 }}
-      className="fixed inset-0 z-50 flex items-center justify-center"
-      onClick={onClose}
-    >
-      <div className="absolute inset-0 bg-black/50" />
-      <motion.div
-        className="relative z-10 rounded-2xl p-6 min-w-[280px] max-w-[340px] shadow-2xl border-2"
-        style={{
-          background: `linear-gradient(135deg, ${tileInfo.bgColor}22, ${tileInfo.bgColor}44)`,
-          backdropFilter: 'blur(16px)',
-          borderColor: tileInfo.color,
-        }}
-        onClick={e => e.stopPropagation()}
-      >
-        {/* Close button */}
-        <button
-          onClick={onClose}
-          className="absolute top-2 right-2 w-8 h-8 rounded-full bg-white/20 flex items-center justify-center text-white font-bold text-lg hover:bg-white/30"
-        >
-          ×
-        </button>
-
-        {/* Large hex icon */}
-        <div className="flex flex-col items-center mb-4">
-          <div
-            className="w-24 h-24 rounded-2xl flex items-center justify-center text-5xl shadow-lg mb-3"
-            style={{
-              background: `linear-gradient(135deg, ${tileInfo.bgColor}, ${tileInfo.color})`,
-              border: `3px solid ${tileInfo.color}`,
-            }}
-          >
-            {info?.icon || '🌊'}
-          </div>
-          <div className="text-2xl font-heading font-bold text-white drop-shadow-lg">
-            {tileInfo.name}タイル
-          </div>
-          {tile.type !== 'sea' && tile.diceNumber > 0 && (
-            <div className="flex items-center gap-2 mt-2">
-              <span className="text-white/80 text-sm">サイコロ出目:</span>
-              <span
-                className="text-2xl font-score font-black px-3 py-1 rounded-full shadow-lg"
-                style={{
-                  background: tile.diceNumber === 6 || tile.diceNumber === 8 ? '#E74C3C' : '#FFF8E1',
-                  color: tile.diceNumber === 6 || tile.diceNumber === 8 ? '#FFF' : '#2C3E50',
-                  border: `2px solid ${tile.diceNumber === 6 || tile.diceNumber === 8 ? '#C0392B' : '#8B6914'}`,
-                }}
-              >
-                {tile.diceNumber}
-              </span>
-            </div>
-          )}
-        </div>
-
-        {/* Resource info */}
-        {tile.type !== 'sea' && (
-          <div className="bg-white/20 rounded-xl p-3 mb-3 backdrop-blur-sm">
-            <div className="text-white text-sm text-center">
-              サイコロで <strong className="text-yellow-300">{tile.diceNumber}</strong> が出たら
-              <br />
-              <span className="text-lg font-bold" style={{ color: info?.color }}>
-                {info?.icon} {info?.name}
-              </span>
-              がもらえる！
-            </div>
-          </div>
-        )}
-
-        {/* Structures on this tile */}
-        {tile.structures.length > 0 && (
-          <div className="bg-white/15 rounded-xl p-3 backdrop-blur-sm">
-            <div className="text-white/80 text-xs mb-2 font-bold">この土地の建物:</div>
-            <div className="flex flex-wrap gap-2">
-              {tile.structures.map((s, i) => (
-                <div
-                  key={i}
-                  className="flex items-center gap-1 px-2 py-1 rounded-lg text-white text-xs font-bold"
-                  style={{ background: playerColors[s.playerId] || '#888' }}
-                >
-                  {s.type === 'settlement' ? '🏠' : s.type === 'city' ? '🏰' : '⛵'}
-                  {s.type === 'settlement' ? '拠点' : s.type === 'city' ? '都市' : '船'}
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        <div className="text-center mt-3">
-          <span className="text-white/60 text-xs">タップして閉じる</span>
-        </div>
-      </motion.div>
-    </motion.div>
-  );
-}
-
-// Dice result zoom overlay - shows which tiles produce resources
-function DiceResultZoom({ diceTotal, tiles, playerColors, onClose }: {
-  diceTotal: number;
-  tiles: GameTile[];
-  playerColors: Record<string, string>;
-  onClose: () => void;
-}) {
-  const matchingTiles = tiles.filter(t => t.diceNumber === diceTotal && t.type !== 'sea');
-  const producingTiles = matchingTiles.filter(t => t.structures.length > 0);
-  const nonProducingTiles = matchingTiles.filter(t => t.structures.length === 0);
+  const resInfo = tile.type !== 'sea' ? RESOURCE_INFO[tile.type as ResourceType] : null;
 
   return (
     <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="fixed inset-0 z-50 flex items-center justify-center"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
       onClick={onClose}
     >
-      <div className="absolute inset-0 bg-black/50" />
       <motion.div
-        initial={{ scale: 0.7, y: 30 }}
+        initial={{ scale: 0.5, y: 40 }}
         animate={{ scale: 1, y: 0 }}
-        exit={{ scale: 0.7, y: 30 }}
-        className="relative z-10 rounded-2xl p-5 min-w-[300px] max-w-[380px] shadow-2xl"
-        style={{
-          background: 'linear-gradient(180deg, #1a1a2e 0%, #16213e 100%)',
-          border: '2px solid #FFD700',
-        }}
+        exit={{ scale: 0.5, y: 40 }}
+        className="parchment rounded-2xl p-5 mx-4 max-w-sm w-full shadow-2xl"
         onClick={e => e.stopPropagation()}
       >
-        {/* Dice result header */}
-        <div className="text-center mb-4">
-          <div className="text-yellow-400 text-sm font-bold mb-1">🎲 サイコロの結果</div>
-          <div className="text-5xl font-score font-black text-yellow-300 drop-shadow-lg">
-            {diceTotal}
+        {/* Tile header */}
+        <div className="flex items-center gap-3 mb-3">
+          <div
+            className="w-16 h-16 rounded-xl flex items-center justify-center text-3xl shadow-lg"
+            style={{ background: `linear-gradient(135deg, ${tileInfo.bgColor}, ${tileInfo.color})` }}
+          >
+            {resInfo?.icon || '🌊'}
+          </div>
+          <div>
+            <div className="font-heading font-bold text-xl text-amber-900">
+              {tileInfo.name}タイル
+            </div>
+            {tile.type !== 'sea' && tile.diceNumber > 0 && (
+              <div className="text-amber-700 text-sm">
+                サイコロ出目: <span className="font-score font-bold text-lg">{tile.diceNumber}</span>
+              </div>
+            )}
           </div>
         </div>
 
-        {/* Producing tiles */}
-        {producingTiles.length > 0 && (
+        {/* Structures on this tile */}
+        {tile.structures.length > 0 ? (
           <div className="mb-3">
-            <div className="text-emerald-400 text-sm font-bold mb-2 text-center">
-              ✨ 資源がもらえるタイル！
+            <div className="text-amber-800 font-heading font-bold text-sm mb-1">🏴 この土地の所有者</div>
+            <div className="flex flex-wrap gap-2">
+              {tile.structures.map((s, i) => (
+                <div
+                  key={i}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-white text-sm font-bold shadow"
+                  style={{ backgroundColor: playerColors[s.playerId] || '#888' }}
+                >
+                  <span className="text-lg">{playerFlags[s.playerId] || '🏳️'}</span>
+                  <span>{s.type === 'settlement' ? '🏠拠点' : s.type === 'city' ? '🏰都市' : '⛵船'}</span>
+                </div>
+              ))}
             </div>
-            <div className="space-y-2">
-              {producingTiles.map(tile => {
-                const info = RESOURCE_INFO[tile.type as ResourceType];
-                return (
-                  <motion.div
-                    key={tile.id}
-                    initial={{ x: -20, opacity: 0 }}
-                    animate={{ x: 0, opacity: 1 }}
-                    transition={{ delay: 0.2 }}
-                    className="flex items-center gap-3 rounded-xl p-3"
-                    style={{
-                      background: `linear-gradient(90deg, ${info.color}33, transparent)`,
-                      border: `1px solid ${info.color}66`,
-                    }}
-                  >
-                    <div
-                      className="w-12 h-12 rounded-xl flex items-center justify-center text-2xl shadow-lg shrink-0"
-                      style={{ background: `linear-gradient(135deg, ${TILE_INFO[tile.type].bgColor}, ${TILE_INFO[tile.type].color})` }}
-                    >
-                      {info.icon}
-                    </div>
-                    <div className="flex-1">
-                      <div className="text-white font-bold text-sm">
-                        {info.icon} {info.name}
-                      </div>
-                      <div className="flex flex-wrap gap-1 mt-1">
-                        {tile.structures.map((s, i) => (
-                          <span
-                            key={i}
-                            className="text-[10px] px-1.5 py-0.5 rounded-full text-white font-bold"
-                            style={{ background: playerColors[s.playerId] || '#888' }}
-                          >
-                            {s.type === 'settlement' ? '🏠 +1' : s.type === 'city' ? '🏰 +2' : '⛵'}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                    <motion.div
-                      initial={{ scale: 0 }}
-                      animate={{ scale: [0, 1.3, 1] }}
-                      transition={{ delay: 0.5, duration: 0.4 }}
-                      className="text-3xl"
-                    >
-                      {info.icon}
-                    </motion.div>
-                  </motion.div>
-                );
-              })}
-            </div>
+          </div>
+        ) : (
+          <div className="text-amber-600 text-sm mb-3 bg-amber-50 rounded-lg p-2">
+            🏳️ まだ誰も所有していない土地です。拠点を建てよう！
           </div>
         )}
 
-        {/* Non-producing tiles */}
-        {nonProducingTiles.length > 0 && (
-          <div className="mb-3">
-            <div className="text-amber-400/70 text-xs font-bold mb-1 text-center">
-              出目 {diceTotal} のタイル（拠点なし）
-            </div>
-            <div className="flex flex-wrap gap-1 justify-center">
-              {nonProducingTiles.map(tile => {
-                const info = RESOURCE_INFO[tile.type as ResourceType];
-                return (
-                  <span
-                    key={tile.id}
-                    className="text-xs px-2 py-1 rounded-lg text-white/60"
-                    style={{ background: `${TILE_INFO[tile.type].color}33` }}
-                  >
-                    {info?.icon} {info?.name}
-                  </span>
-                );
-              })}
-            </div>
+        {/* Resource explanation */}
+        {tile.type !== 'sea' && (
+          <div className="bg-amber-50 rounded-lg p-2 text-amber-800 text-xs">
+            サイコロで <span className="font-bold text-lg">{tile.diceNumber}</span> が出たら、
+            ここに拠点がある人は <span className="font-bold">{resInfo?.icon}{resInfo?.name}</span> がもらえるよ！
+            {tile.structures.some(s => s.type === 'city') && (
+              <span className="text-amber-600"> 🏰都市なら2倍！</span>
+            )}
           </div>
         )}
 
-        {/* No matching tiles */}
-        {matchingTiles.length === 0 && (
-          <div className="text-center py-4">
-            <div className="text-4xl mb-2">😢</div>
-            <div className="text-white/70 text-sm">
-              出目 {diceTotal} のタイルがないよ…
-            </div>
-          </div>
-        )}
-
-        {/* No structures on matching tiles */}
-        {matchingTiles.length > 0 && producingTiles.length === 0 && (
-          <div className="text-center py-2">
-            <div className="text-amber-400/70 text-sm">
-              😢 このタイルには拠点がないので資源はもらえなかった…
-            </div>
-            <div className="text-white/50 text-xs mt-1">
-              拠点を建てれば次から資源がもらえるよ！
-            </div>
-          </div>
-        )}
-
-        <div className="text-center mt-3">
+        <div className="text-center mt-4">
           <button
             onClick={onClose}
-            className="game-btn-primary text-sm px-6 py-2 rounded-xl"
+            className="game-btn-primary text-sm px-8 py-2.5 rounded-xl"
           >
-            OK
+            とじる
           </button>
         </div>
       </motion.div>
@@ -292,6 +118,127 @@ function DiceResultZoom({ diceTotal, tiles, playerColors, onClose }: {
   );
 }
 
+// --- Dice Result Zoom (shows which tiles produce resources after dice roll) ---
+function DiceResultZoom({ diceTotal, tiles, playerColors, playerFlags, onClose, pendingEvent }: {
+  diceTotal: number;
+  tiles: GameTile[];
+  playerColors: Record<string, string>;
+  playerFlags: Record<string, string>;
+  onClose: () => void;
+  pendingEvent?: EventCard | null;
+}) {
+  const matchingTiles = tiles.filter(t => t.diceNumber === diceTotal && t.type !== 'sea');
+  const producingTiles = matchingTiles.filter(t => t.structures.length > 0);
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <motion.div
+        initial={{ scale: 0.5, y: 50 }}
+        animate={{ scale: 1, y: 0 }}
+        exit={{ scale: 0.5, y: 50 }}
+        className="parchment rounded-2xl p-5 mx-4 max-w-sm w-full shadow-2xl"
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="text-center mb-3">
+          <div className="font-heading font-bold text-amber-900 text-lg">🎲 サイコロの結果</div>
+          <div className="font-score text-4xl font-bold text-amber-800 my-1">{diceTotal}</div>
+        </div>
+
+        {/* Matching tiles */}
+        {matchingTiles.length > 0 ? (
+          <div className="space-y-2 mb-3">
+            {matchingTiles.map(tile => {
+              const resInfo = RESOURCE_INFO[tile.type as ResourceType];
+              const tileInfo = TILE_INFO[tile.type];
+              const hasStructures = tile.structures.length > 0;
+
+              return (
+                <motion.div
+                  key={tile.id}
+                  initial={{ x: -20, opacity: 0 }}
+                  animate={{ x: 0, opacity: 1 }}
+                  className={`rounded-xl p-3 ${hasStructures ? 'ring-2 ring-yellow-400 shadow-lg' : 'opacity-70'}`}
+                  style={{ background: `linear-gradient(135deg, ${tileInfo.bgColor}40, ${tileInfo.color}30)`, border: `2px solid ${tileInfo.color}60` }}
+                >
+                  <div className="flex items-center gap-2">
+                    <span className="text-2xl">{resInfo.icon}</span>
+                    <span className="font-heading font-bold text-amber-900">{resInfo.name}</span>
+                    {hasStructures && (
+                      <span className="ml-auto text-xs bg-yellow-400 text-yellow-900 px-2 py-0.5 rounded-full font-bold animate-pulse">
+                        ✨ 資源ゲット！
+                      </span>
+                    )}
+                  </div>
+                  {hasStructures && (
+                    <div className="mt-1.5 flex flex-wrap gap-1.5">
+                      {tile.structures.map((s, i) => (
+                        <div
+                          key={i}
+                          className="flex items-center gap-1 px-2 py-0.5 rounded-lg text-white text-xs font-bold"
+                          style={{ backgroundColor: playerColors[s.playerId] || '#888' }}
+                        >
+                          <span>{playerFlags[s.playerId] || '🏳️'}</span>
+                          <span>{s.type === 'settlement' ? '+1' : '+2'}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {!hasStructures && (
+                    <div className="text-amber-600 text-xs mt-1">拠点なし — 建てれば次から資源がもらえる！</div>
+                  )}
+                </motion.div>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="text-center py-3 text-amber-600 text-sm">
+            この出目({diceTotal})のタイルはありません
+          </div>
+        )}
+
+        {producingTiles.length === 0 && matchingTiles.length > 0 && (
+          <div className="text-center py-2 text-amber-500 text-sm">
+            😢 拠点がないので資源はもらえなかった…
+          </div>
+        )}
+
+        {/* Pending event preview */}
+        {pendingEvent && (
+          <motion.div
+            initial={{ y: 10, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            transition={{ delay: 0.3 }}
+            className={`rounded-xl p-2.5 mt-2 text-center border-2 ${
+              pendingEvent.category === 'positive'
+                ? 'bg-green-50 border-green-400 text-green-800'
+                : 'bg-red-50 border-red-400 text-red-800'
+            }`}
+          >
+            <div className="text-lg mb-0.5">{pendingEvent.icon}</div>
+            <div className="font-heading font-bold text-sm">
+              {pendingEvent.category === 'positive' ? '✨ イベント発生！' : '⚠️ イベント発生！'}
+            </div>
+            <div className="text-xs">{pendingEvent.title}</div>
+          </motion.div>
+        )}
+
+        <div className="text-center mt-3">
+          <button onClick={onClose} className="game-btn-primary text-sm px-8 py-2.5 rounded-xl">
+            {pendingEvent ? 'イベントを見る' : 'OK'}
+          </button>
+        </div>
+      </motion.div>
+    </motion.div>
+  );
+}
+
+// --- Single Hex Tile ---
 interface HexTileProps {
   tile: GameTile;
   cx: number;
@@ -300,11 +247,11 @@ interface HexTileProps {
   isBuildable: boolean;
   isSelected: boolean;
   playerColors: Record<string, string>;
+  playerFlags: Record<string, string>;
   onTap: (tileId: number) => void;
 }
 
-function HexTile({ tile, cx, cy, isHighlighted, isBuildable, isSelected, playerColors, onTap }: HexTileProps) {
-  const tileInfo = TILE_INFO[tile.type];
+function HexTile({ tile, cx, cy, isHighlighted, isBuildable, isSelected, playerColors, playerFlags, onTap }: HexTileProps) {
   const resInfo = tile.type !== 'sea' ? RESOURCE_INFO[tile.type as ResourceType] : null;
 
   const getGradient = (type: TileType): [string, string] => {
@@ -318,24 +265,31 @@ function HexTile({ tile, cx, cy, isHighlighted, isBuildable, isSelected, playerC
   };
   const [c1, c2] = getGradient(tile.type);
 
-  const darken = (hex: string) => {
-    const r = Math.max(0, parseInt(hex.slice(1, 3), 16) - 40);
-    const g = Math.max(0, parseInt(hex.slice(3, 5), 16) - 40);
-    const b = Math.max(0, parseInt(hex.slice(5, 7), 16) - 40);
-    return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+  // Flag positions around the hex for structures
+  const getStructurePos = (index: number, total: number) => {
+    // Place flags at specific positions around the hex
+    const positions = [
+      { x: cx, y: cy - HEX_SIZE + 8 },          // top
+      { x: cx + HEX_SIZE - 14, y: cy - 8 },     // top-right
+      { x: cx - HEX_SIZE + 14, y: cy - 8 },     // top-left
+      { x: cx + HEX_SIZE - 14, y: cy + 12 },    // bottom-right
+      { x: cx - HEX_SIZE + 14, y: cy + 12 },    // bottom-left
+      { x: cx, y: cy + HEX_SIZE - 12 },          // bottom
+    ];
+    return positions[index % positions.length];
   };
 
   return (
     <g
       style={{
-        cursor: isBuildable ? 'pointer' : 'pointer',
+        cursor: 'pointer',
         filter: isHighlighted
-          ? 'drop-shadow(0 0 12px rgba(255, 215, 0, 0.95))'
+          ? 'drop-shadow(0 0 16px rgba(255, 215, 0, 1))'
           : isBuildable
-            ? 'drop-shadow(0 0 8px rgba(46, 204, 113, 0.8))'
+            ? 'drop-shadow(0 0 10px rgba(46, 204, 113, 0.9))'
             : isSelected
-              ? 'drop-shadow(0 0 6px rgba(52, 152, 219, 0.7))'
-              : 'drop-shadow(0 2px 3px rgba(0,0,0,0.3))',
+              ? 'drop-shadow(0 0 8px rgba(52, 152, 219, 0.8))'
+              : 'drop-shadow(0 3px 4px rgba(0,0,0,0.35))',
       }}
       onClick={() => onTap(tile.id)}
     >
@@ -356,7 +310,15 @@ function HexTile({ tile, cx, cy, isHighlighted, isBuildable, isSelected, playerC
           isSelected ? '#3498DB' :
           '#5C3D2E'
         }
-        strokeWidth={isHighlighted ? 3 : isBuildable ? 2.5 : 2}
+        strokeWidth={isHighlighted ? 3.5 : isBuildable ? 3 : 2}
+      />
+
+      {/* Inner hex pattern for texture */}
+      <polygon
+        points={getHexPoints(cx, cy, HEX_SIZE - 8)}
+        fill="none"
+        stroke="rgba(255,255,255,0.15)"
+        strokeWidth={1}
       />
 
       {/* Highlight glow for dice match */}
@@ -364,18 +326,18 @@ function HexTile({ tile, cx, cy, isHighlighted, isBuildable, isSelected, playerC
         <>
           <polygon
             points={getHexPoints(cx, cy, HEX_SIZE - 1)}
-            fill="rgba(255,215,0,0.2)"
+            fill="rgba(255,215,0,0.25)"
           >
-            <animate attributeName="opacity" values="0.1;0.35;0.1" dur="1.2s" repeatCount="indefinite" />
+            <animate attributeName="opacity" values="0.1;0.4;0.1" dur="1s" repeatCount="indefinite" />
           </polygon>
           <polygon
-            points={getHexPoints(cx, cy, HEX_SIZE - 4)}
+            points={getHexPoints(cx, cy, HEX_SIZE - 5)}
             fill="none"
             stroke="#FFD700"
-            strokeWidth={1.5}
-            strokeDasharray="4,3"
+            strokeWidth={2}
+            strokeDasharray="6,4"
           >
-            <animate attributeName="stroke-dashoffset" values="0;14" dur="1s" repeatCount="indefinite" />
+            <animate attributeName="stroke-dashoffset" values="0;20" dur="1.2s" repeatCount="indefinite" />
           </polygon>
         </>
       )}
@@ -384,22 +346,22 @@ function HexTile({ tile, cx, cy, isHighlighted, isBuildable, isSelected, playerC
       {isBuildable && !isHighlighted && (
         <polygon
           points={getHexPoints(cx, cy, HEX_SIZE - 1)}
-          fill="rgba(46, 204, 113, 0.15)"
+          fill="rgba(46, 204, 113, 0.2)"
           stroke="#2ECC71"
-          strokeWidth={2}
-          strokeDasharray="5,3"
+          strokeWidth={2.5}
+          strokeDasharray="6,4"
         >
-          <animate attributeName="opacity" values="0.4;1;0.4" dur="1.2s" repeatCount="indefinite" />
+          <animate attributeName="opacity" values="0.3;1;0.3" dur="1s" repeatCount="indefinite" />
         </polygon>
       )}
 
       {/* Resource icon - large and centered */}
       <text
         x={cx}
-        y={tile.type === 'sea' ? cy : cy - 5}
+        y={tile.type === 'sea' ? cy - 2 : cy - 6}
         textAnchor="middle"
         dominantBaseline="middle"
-        fontSize={tile.type === 'sea' ? 22 : 20}
+        fontSize={tile.type === 'sea' ? 26 : 24}
         className="select-none pointer-events-none"
       >
         {resInfo?.icon || '🌊'}
@@ -409,14 +371,14 @@ function HexTile({ tile, cx, cy, isHighlighted, isBuildable, isSelected, playerC
       {tile.type !== 'sea' && (
         <text
           x={cx}
-          y={cy - 18}
+          y={cy - 24}
           textAnchor="middle"
           dominantBaseline="middle"
-          fontSize={8}
+          fontSize={10}
           fontWeight="bold"
           fill="white"
           className="select-none pointer-events-none"
-          style={{ textShadow: '0 1px 2px rgba(0,0,0,0.7)' }}
+          style={{ textShadow: '0 1px 3px rgba(0,0,0,0.8)' }}
         >
           {resInfo?.name}
         </text>
@@ -427,18 +389,18 @@ function HexTile({ tile, cx, cy, isHighlighted, isBuildable, isSelected, playerC
         <>
           <circle
             cx={cx}
-            cy={cy + 15}
-            r={11}
+            cy={cy + 18}
+            r={13}
             fill={isHighlighted ? '#FFD700' : '#FFF8E1'}
             stroke={isHighlighted ? '#B8860B' : '#5C3D2E'}
-            strokeWidth={isHighlighted ? 2 : 1.5}
+            strokeWidth={isHighlighted ? 2.5 : 2}
           />
           <text
             x={cx}
-            y={cy + 16}
+            y={cy + 19}
             textAnchor="middle"
             dominantBaseline="middle"
-            fontSize={13}
+            fontSize={15}
             fontWeight="bold"
             fontFamily="'Fredoka', sans-serif"
             fill={
@@ -452,40 +414,55 @@ function HexTile({ tile, cx, cy, isHighlighted, isBuildable, isSelected, playerC
         </>
       )}
 
-      {/* Player structures - positioned around the hex edge */}
+      {/* Player structures - FLAGS on tiles! */}
       {tile.structures.map((struct, i) => {
-        const angle = (Math.PI * 2 / Math.max(tile.structures.length, 1)) * i - Math.PI / 2;
-        const dist = HEX_SIZE - 10;
-        const sx = cx + Math.cos(angle) * dist;
-        const sy = cy + Math.sin(angle) * dist;
+        const pos = getStructurePos(i, tile.structures.length);
         const pColor = playerColors[struct.playerId] || '#888';
+        const pFlag = playerFlags[struct.playerId] || '🏳️';
 
         return (
           <g key={i}>
-            {struct.type === 'settlement' && (
-              <>
-                <circle cx={sx} cy={sy} r={7} fill={pColor} stroke="#FFF" strokeWidth={1.5} />
-                <text x={sx} y={sy + 1} textAnchor="middle" dominantBaseline="middle" fontSize={8} className="select-none pointer-events-none">
-                  🏠
-                </text>
-              </>
-            )}
-            {struct.type === 'city' && (
-              <>
-                <circle cx={sx} cy={sy} r={8} fill={pColor} stroke="#FFD700" strokeWidth={2} />
-                <text x={sx} y={sy + 1} textAnchor="middle" dominantBaseline="middle" fontSize={9} className="select-none pointer-events-none">
-                  🏰
-                </text>
-              </>
-            )}
-            {struct.type === 'ship' && (
-              <>
-                <circle cx={sx} cy={sy} r={7} fill={pColor} stroke="#FFF" strokeWidth={1.5} />
-                <text x={sx} y={sy + 1} textAnchor="middle" dominantBaseline="middle" fontSize={9} className="select-none pointer-events-none">
-                  ⛵
-                </text>
-              </>
-            )}
+            {/* Flag pole */}
+            <line
+              x1={pos.x}
+              y1={pos.y + 2}
+              x2={pos.x}
+              y2={pos.y - 14}
+              stroke="#5C3D2E"
+              strokeWidth={2}
+              strokeLinecap="round"
+            />
+            {/* Flag background circle */}
+            <circle
+              cx={pos.x}
+              cy={pos.y - 14}
+              r={struct.type === 'city' ? 12 : 10}
+              fill={pColor}
+              stroke={struct.type === 'city' ? '#FFD700' : '#FFF'}
+              strokeWidth={struct.type === 'city' ? 2.5 : 1.5}
+            />
+            {/* Flag emoji */}
+            <text
+              x={pos.x}
+              y={pos.y - 13}
+              textAnchor="middle"
+              dominantBaseline="middle"
+              fontSize={struct.type === 'city' ? 13 : 11}
+              className="select-none pointer-events-none"
+            >
+              {pFlag}
+            </text>
+            {/* Structure type indicator below flag */}
+            <text
+              x={pos.x}
+              y={pos.y + 6}
+              textAnchor="middle"
+              dominantBaseline="middle"
+              fontSize={8}
+              className="select-none pointer-events-none"
+            >
+              {struct.type === 'settlement' ? '🏠' : struct.type === 'city' ? '🏰' : '⛵'}
+            </text>
           </g>
         );
       })}
@@ -494,51 +471,71 @@ function HexTile({ tile, cx, cy, isHighlighted, isBuildable, isSelected, playerC
 }
 
 export default function HexMap() {
-  const { tiles, players, currentPlayerIndex, highlightedTileIds, buildMode, selectedTileId, selectTile, phase, diceResult, showResourceGains, resourceGains, dismissResourceGains, isPlayingAI } = useGameStore();
+  const {
+    tiles, players, currentPlayerIndex, highlightedTileIds,
+    buildMode, selectedTileId, selectTile, phase, diceResult,
+    showResourceGains, resourceGains, dismissResourceGains, isPlayingAI,
+    pendingEvent
+  } = useGameStore();
   const currentPlayer = players[currentPlayerIndex];
   const [zoomedTile, setZoomedTile] = useState<GameTile | null>(null);
-  const [showDiceZoom, setShowDiceZoom] = useState(false);
+  const mapRef = useRef<HTMLDivElement>(null);
 
-  // Build a map of playerId -> color
+  // Build maps of playerId -> color/flag
   const playerColors: Record<string, string> = {};
-  players.forEach(p => { playerColors[p.id] = p.color; });
+  const playerFlags: Record<string, string> = {};
+  players.forEach(p => {
+    playerColors[p.id] = p.color;
+    playerFlags[p.id] = p.flagEmoji;
+  });
 
   const diceTotal = diceResult ? diceResult[0] + diceResult[1] : 0;
 
   // Show dice result zoom when dice is rolled and there are highlighted tiles
-  const shouldShowDiceZoom = phase === 'action' && diceResult && highlightedTileIds.length > 0 && showResourceGains !== false && !isPlayingAI;
+  const shouldShowDiceZoom = phase === 'action' && diceResult && showResourceGains && !isPlayingAI;
+
+  // Auto-scroll to highlighted tiles when dice is rolled
+  useEffect(() => {
+    if (highlightedTileIds.length > 0 && mapRef.current) {
+      // Scroll the map to center on highlighted tiles
+      const svg = mapRef.current.querySelector('svg');
+      if (svg) {
+        mapRef.current.scrollTo({
+          top: Math.max(0, mapRef.current.scrollHeight / 2 - mapRef.current.clientHeight / 2),
+          behavior: 'smooth',
+        });
+      }
+    }
+  }, [highlightedTileIds]);
 
   const handleTileClick = (tileId: number) => {
-    // If in build mode, delegate to store
     if (buildMode) {
       selectTile(tileId);
       return;
     }
-
-    // Otherwise, zoom into the tile
     const tile = tiles.find(t => t.id === tileId);
     if (tile) {
       setZoomedTile(tile);
     }
   };
 
-  // Calculate positions with more spacing
-  const colSpacing = HEX_W * 0.75 + HEX_GAP;
-  const rowSpacing = HEX_H + HEX_GAP;
+  // Calculate positions with more spacing for bigger tiles
+  const colSpacing = HEX_W * 0.78 + HEX_GAP;
+  const rowSpacing = HEX_H + HEX_GAP + 4;
   const maxCols = Math.max(...ROWS);
-  const svgWidth = maxCols * colSpacing + HEX_SIZE + 20;
-  const svgHeight = ROWS.length * rowSpacing + HEX_SIZE + 20;
+  const svgWidth = maxCols * colSpacing + HEX_SIZE + 30;
+  const svgHeight = ROWS.length * rowSpacing + HEX_SIZE + 40;
 
   let tileIndex = 0;
 
   return (
-    <div className="flex flex-col items-center overflow-hidden w-full">
+    <div className="flex flex-col items-center w-full">
       {/* Build mode indicator */}
       {buildMode && (
         <motion.div
           initial={{ y: -20, opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}
-          className="bg-emerald-500/90 text-white font-heading font-bold text-sm px-5 py-2 rounded-full mb-1 shadow-lg"
+          className="bg-emerald-500/90 text-white font-heading font-bold text-sm px-5 py-2 rounded-full mb-1 shadow-lg z-20"
         >
           <span className="animate-pulse inline-block mr-1">
             {buildMode === 'settlement' ? '🏠' : buildMode === 'city' ? '🏰' : '⛵'}
@@ -549,43 +546,50 @@ export default function HexMap() {
         </motion.div>
       )}
 
-      {/* SVG Map */}
-      <svg
-        viewBox={`0 0 ${svgWidth} ${svgHeight}`}
-        width="100%"
-        style={{ maxWidth: `${svgWidth}px`, maxHeight: '44vh' }}
-        className="drop-shadow-lg"
+      {/* Scrollable Map Container */}
+      <div
+        ref={mapRef}
+        className="w-full overflow-auto"
+        style={{ maxHeight: '50vh', WebkitOverflowScrolling: 'touch' }}
       >
-        {ROWS.map((count, row) => {
-          const rowOffset = (maxCols - count) * colSpacing / 2;
-          return Array.from({ length: count }).map((_, col) => {
-            const tile = tiles[tileIndex];
-            if (!tile) return null;
-            tileIndex++;
+        <svg
+          viewBox={`0 0 ${svgWidth} ${svgHeight}`}
+          width="100%"
+          style={{ minWidth: '360px', minHeight: '300px' }}
+          className="drop-shadow-lg"
+        >
+          {ROWS.map((count, row) => {
+            const rowOffset = (maxCols - count) * colSpacing / 2;
+            return Array.from({ length: count }).map((_, col) => {
+              const tile = tiles[tileIndex];
+              if (!tile) return null;
+              tileIndex++;
 
-            const cx = rowOffset + col * colSpacing + HEX_SIZE + 10;
-            const cy = row * rowSpacing + HEX_SIZE + 10;
+              const cx = rowOffset + col * colSpacing + HEX_SIZE + 15;
+              const cy = row * rowSpacing + HEX_SIZE + 20;
 
-            const isHighlighted = highlightedTileIds.includes(tile.id);
-            const isBuildable = buildMode !== null && highlightedTileIds.includes(tile.id);
-            const isSelected = selectedTileId === tile.id;
+              const isHighlighted = highlightedTileIds.includes(tile.id);
+              const isBuildable = buildMode !== null && highlightedTileIds.includes(tile.id);
+              const isSelected = selectedTileId === tile.id;
 
-            return (
-              <HexTile
-                key={tile.id}
-                tile={tile}
-                cx={cx}
-                cy={cy}
-                isHighlighted={isHighlighted && !buildMode}
-                isBuildable={isBuildable}
-                isSelected={isSelected}
-                playerColors={playerColors}
-                onTap={handleTileClick}
-              />
-            );
-          });
-        })}
-      </svg>
+              return (
+                <HexTile
+                  key={tile.id}
+                  tile={tile}
+                  cx={cx}
+                  cy={cy}
+                  isHighlighted={isHighlighted && !buildMode}
+                  isBuildable={isBuildable}
+                  isSelected={isSelected}
+                  playerColors={playerColors}
+                  playerFlags={playerFlags}
+                  onTap={handleTileClick}
+                />
+              );
+            });
+          })}
+        </svg>
+      </div>
 
       {/* Tile Zoom Card */}
       <AnimatePresence>
@@ -594,17 +598,20 @@ export default function HexMap() {
             tile={zoomedTile}
             onClose={() => setZoomedTile(null)}
             playerColors={playerColors}
+            playerFlags={playerFlags}
           />
         )}
       </AnimatePresence>
 
-      {/* Dice Result Zoom - shows which tiles produce resources */}
+      {/* Dice Result Zoom */}
       <AnimatePresence>
         {shouldShowDiceZoom && (
           <DiceResultZoom
             diceTotal={diceTotal}
             tiles={tiles}
             playerColors={playerColors}
+            playerFlags={playerFlags}
+            pendingEvent={pendingEvent}
             onClose={() => {
               dismissResourceGains();
             }}
