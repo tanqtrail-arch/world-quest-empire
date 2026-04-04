@@ -21,7 +21,7 @@ import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { HelpCircle, X } from 'lucide-react';
 
-const BOARD_BG = 'https://d2xsxph8kpxj0f.cloudfront.net/310519663286960690/RthryRhRZNJvzXLKUFJiBd/game-board-bg-8s6c49wGQN8mc2Rzb2agwx.webp';
+const BOARD_BG = '/game-board-bg.webp';
 
 function TileHelpTooltip({ onClose }: { onClose: () => void }) {
   return (
