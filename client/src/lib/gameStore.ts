@@ -12,10 +12,25 @@ import {
 } from './gameLogic';
 import { BUILD_COSTS } from './gameTypes';
 
+// Resource gain notification
+export interface ResourceGain {
+  playerName: string;
+  resource: ResourceType;
+  amount: number;
+  tileId: number;
+}
+
 interface GameStore extends GameState {
   // Navigation
   screen: 'title' | 'create' | 'join' | 'rules' | 'game' | 'result';
   setScreen: (screen: GameStore['screen']) => void;
+
+  // Tile interaction
+  selectedTileId: number | null;
+  buildMode: StructureType | null;
+  highlightedTileIds: number[];
+  resourceGains: ResourceGain[];
+  showResourceGains: boolean;
 
   // Game Setup
   initGame: (playerName: string, playerCount: number, difficulty: Difficulty) => void;
@@ -29,6 +44,12 @@ interface GameStore extends GameState {
   doEndTurn: () => void;
   resolveEvent: () => void;
   selectResourceForEvent: (resource: ResourceType) => void;
+
+  // Tile interaction actions
+  selectTile: (tileId: number) => void;
+  setBuildMode: (mode: StructureType | null) => void;
+  clearSelection: () => void;
+  dismissResourceGains: () => void;
 
   // Helpers
   getCurrentPlayer: () => Player | undefined;
@@ -51,7 +72,89 @@ export const useGameStore = create<GameStore>((set, get) => ({
   currentEvent: null,
   winner: null,
 
+  // Tile interaction state
+  selectedTileId: null,
+  buildMode: null,
+  highlightedTileIds: [],
+  resourceGains: [],
+  showResourceGains: false,
+
   setScreen: (screen) => set({ screen }),
+
+  // Tile interaction actions
+  selectTile: (tileId) => {
+    const state = get();
+    const player = state.players[state.currentPlayerIndex];
+    if (!player) return;
+
+    // If in build mode, try to build on this tile
+    if (state.buildMode && state.phase === 'action') {
+      const tile = state.tiles.find(t => t.id === tileId);
+      if (!tile) return;
+
+      if (state.buildMode === 'city') {
+        // Upgrade existing settlement on this tile
+        const hasSettlement = tile.structures.some(s => s.playerId === player.id && s.type === 'settlement');
+        if (hasSettlement) {
+          get().doUpgrade(tileId);
+          set({ buildMode: null, selectedTileId: null, highlightedTileIds: [] });
+        }
+      } else if (state.buildMode === 'ship') {
+        get().doBuild(tileId, 'ship');
+        set({ buildMode: null, selectedTileId: null, highlightedTileIds: [] });
+      } else {
+        // Build settlement
+        const alreadyHas = tile.structures.some(s => s.playerId === player.id);
+        if (!alreadyHas && tile.type !== 'sea') {
+          get().doBuild(tileId, 'settlement');
+          set({ buildMode: null, selectedTileId: null, highlightedTileIds: [] });
+        }
+      }
+      return;
+    }
+
+    // Just select/deselect
+    set({ selectedTileId: state.selectedTileId === tileId ? null : tileId });
+  },
+
+  setBuildMode: (mode) => {
+    const state = get();
+    const player = state.players[state.currentPlayerIndex];
+    if (!player) return;
+
+    if (!mode) {
+      set({ buildMode: null, highlightedTileIds: [], selectedTileId: null });
+      return;
+    }
+
+    // Calculate which tiles can be built on
+    let buildableTileIds: number[] = [];
+    if (mode === 'settlement') {
+      buildableTileIds = state.tiles
+        .filter(t => t.type !== 'sea' && !t.structures.some(s => s.playerId === player.id))
+        .map(t => t.id);
+    } else if (mode === 'city') {
+      buildableTileIds = state.tiles
+        .filter(t => t.structures.some(s => s.playerId === player.id && s.type === 'settlement'))
+        .map(t => t.id);
+    } else if (mode === 'ship') {
+      buildableTileIds = state.tiles
+        .filter(t => t.type === 'sea' && !t.structures.some(s => s.playerId === player.id))
+        .map(t => t.id);
+      // If no sea tiles available, allow any tile
+      if (buildableTileIds.length === 0) {
+        buildableTileIds = state.tiles
+          .filter(t => !t.structures.some(s => s.playerId === player.id))
+          .map(t => t.id);
+      }
+    }
+
+    set({ buildMode: mode, highlightedTileIds: buildableTileIds, selectedTileId: null });
+  },
+
+  clearSelection: () => set({ selectedTileId: null, buildMode: null, highlightedTileIds: [] }),
+
+  dismissResourceGains: () => set({ showResourceGains: false, resourceGains: [] }),
 
   initGame: (playerName, playerCount, difficulty) => {
     const tiles = generateMap();
@@ -102,6 +205,11 @@ export const useGameStore = create<GameStore>((set, get) => ({
       gameLog: [createLog('ゲーム開始！サイコロを振ろう！', 'system')],
       currentEvent: null,
       winner: null,
+      selectedTileId: null,
+      buildMode: null,
+      highlightedTileIds: [],
+      resourceGains: [],
+      showResourceGains: false,
     });
   },
 
@@ -119,13 +227,32 @@ export const useGameStore = create<GameStore>((set, get) => ({
       createLog(`${player.name}がサイコロを振った！ 🎲 ${dice[0]} + ${dice[1]} = ${total}`, 'info', player.id),
     ];
 
+    // Build resource gain notifications
+    const resourceGains: ResourceGain[] = [];
     gains.forEach(g => {
+      const resName = g.resource === 'rubber' ? 'ゴム' : g.resource === 'oil' ? '石油' : g.resource === 'gold' ? '金' : '食料';
       logs.push(createLog(
-        `${g.player.name}が${g.resource === 'rubber' ? 'ゴム' : g.resource === 'oil' ? '石油' : g.resource === 'gold' ? '金' : '食料'}を${g.amount}つゲット！`,
+        `${g.player.name}が${resName}を${g.amount}つゲット！`,
         'resource',
         g.player.id
       ));
+      // Find the tile that produced this resource
+      const producingTile = state.tiles.find(t => 
+        t.diceNumber === total && t.type === g.resource && 
+        t.structures.some(s => s.playerId === g.player.id)
+      );
+      resourceGains.push({
+        playerName: g.player.name,
+        resource: g.resource,
+        amount: g.amount,
+        tileId: producingTile?.id ?? -1,
+      });
     });
+
+    // Highlight tiles that match the dice roll
+    const matchingTileIds = state.tiles
+      .filter(t => t.diceNumber === total && t.type !== 'sea')
+      .map(t => t.id);
 
     // Check for event
     let event: EventCard | null = null;
@@ -140,7 +267,19 @@ export const useGameStore = create<GameStore>((set, get) => ({
       currentEvent: event,
       gameLog: [...state.gameLog, ...logs],
       players: [...state.players],
+      highlightedTileIds: matchingTileIds,
+      resourceGains,
+      showResourceGains: gains.length > 0,
     });
+
+    // Clear highlights after 2.5 seconds
+    setTimeout(() => {
+      const current = get();
+      // Only clear if still showing the same dice result
+      if (current.diceResult && current.diceResult[0] === dice[0] && current.diceResult[1] === dice[1]) {
+        set({ highlightedTileIds: [] });
+      }
+    }, 2500);
   },
 
   resolveEvent: () => {
@@ -165,8 +304,9 @@ export const useGameStore = create<GameStore>((set, get) => ({
     if (!player || !state.currentEvent) return;
 
     player.resources[resource]++;
+    const resName = resource === 'rubber' ? 'ゴム' : resource === 'oil' ? '石油' : resource === 'gold' ? '金' : '食料';
     const log = createLog(
-      `${player.name}が${resource === 'rubber' ? 'ゴム' : resource === 'oil' ? '石油' : resource === 'gold' ? '金' : '食料'}を選んだ！`,
+      `${player.name}が${resName}を選んだ！`,
       'resource',
       player.id
     );
@@ -218,6 +358,9 @@ export const useGameStore = create<GameStore>((set, get) => ({
         gameLog: [...state.gameLog, log],
         players: [...state.players],
         tiles: [...state.tiles],
+        buildMode: null,
+        highlightedTileIds: [],
+        selectedTileId: null,
       });
     }
   },
@@ -254,6 +397,9 @@ export const useGameStore = create<GameStore>((set, get) => ({
         gameLog: [...state.gameLog, log],
         players: [...state.players],
         tiles: [...state.tiles],
+        buildMode: null,
+        highlightedTileIds: [],
+        selectedTileId: null,
       });
     }
   },
@@ -291,7 +437,6 @@ export const useGameStore = create<GameStore>((set, get) => ({
     if (!tile || tile.type === 'sea') return;
 
     // Check if player has ship and can afford expand cost
-    const hasShip = player.structures.some(s => s.type === 'ship');
     if (!canAfford(player, { food: 1, gold: 1 })) return;
 
     // Pay cost and build settlement
@@ -332,7 +477,6 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
     // Check if game over by turns
     if (nextTurn > state.maxTurns) {
-      // Find winner by most VP
       const winner = [...state.players].sort((a, b) => b.victoryPoints - a.victoryPoints)[0];
       set({
         winner,
@@ -433,6 +577,11 @@ export const useGameStore = create<GameStore>((set, get) => ({
         gameLog: [...state.gameLog, ...logs, createLog(`${state.players[humanIndex].name}のターン！サイコロを振ろう！`, 'system')],
         players: [...state.players],
         tiles: [...state.tiles],
+        selectedTileId: null,
+        buildMode: null,
+        highlightedTileIds: [],
+        resourceGains: [],
+        showResourceGains: false,
       });
     } else {
       set({
@@ -442,6 +591,11 @@ export const useGameStore = create<GameStore>((set, get) => ({
         diceResult: null,
         gameLog: [...state.gameLog, ...logs],
         players: [...state.players],
+        selectedTileId: null,
+        buildMode: null,
+        highlightedTileIds: [],
+        resourceGains: [],
+        showResourceGains: false,
       });
     }
   },
