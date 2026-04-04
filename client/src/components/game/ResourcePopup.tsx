@@ -1,9 +1,9 @@
 /*
  * ResourcePopup - 資源獲得時にPlayerPanel上に浮き上がるポップアップ通知
  * Design: 資源アイコン + 数量が下から浮き上がってフェードアウト
- * AIターン中に人間プレイヤーが資源を獲得した場合にも表示
+ * 現在のプレイヤーが資源を獲得した場合に表示
  */
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useGameStore } from '@/lib/gameStore';
 import { RESOURCE_INFO, type ResourceType } from '@/lib/gameTypes';
@@ -13,65 +13,60 @@ interface PopupItem {
   resource: ResourceType;
   amount: number;
   playerName: string;
-  isHumanPlayer: boolean;
 }
 
 export default function ResourcePopup() {
   const [popups, setPopups] = useState<PopupItem[]>([]);
   const players = useGameStore(s => s.players);
+  const currentPlayerIndex = useGameStore(s => s.currentPlayerIndex);
   const currentAIAction = useGameStore(s => s.currentAIAction);
   const isPlayingAI = useGameStore(s => s.isPlayingAI);
   const showResourceGains = useGameStore(s => s.showResourceGains);
   const resourceGains = useGameStore(s => s.resourceGains);
 
-  // Find the human player
-  const humanPlayer = players.find(p => !p.isAI);
+  const currentPlayer = players[currentPlayerIndex];
 
-  // Track AI action resource gains for human player
+  // Track AI action resource gains for current player
   useEffect(() => {
     if (!isPlayingAI || !currentAIAction || currentAIAction.type !== 'resource_gain') return;
-    if (!humanPlayer) return;
+    if (!currentPlayer) return;
 
-    // Check if this resource gain is for the human player
-    if (currentAIAction.playerId === humanPlayer.id) {
+    // Show popup for current player's resource gains during AI turns
+    if (currentAIAction.playerId === currentPlayer.id) {
       const newPopup: PopupItem = {
         id: `${Date.now()}-${Math.random()}`,
         resource: currentAIAction.resource!,
         amount: currentAIAction.resourceAmount || 1,
-        playerName: humanPlayer.name,
-        isHumanPlayer: true,
+        playerName: currentPlayer.name,
       };
       setPopups(prev => [...prev, newPopup]);
 
-      // Remove after animation
       setTimeout(() => {
         setPopups(prev => prev.filter(p => p.id !== newPopup.id));
       }, 2500);
     }
-  }, [currentAIAction, isPlayingAI, humanPlayer]);
+  }, [currentAIAction, isPlayingAI, currentPlayer?.id]);
 
-  // Track human player's own turn resource gains
+  // Track current player's own turn resource gains
   useEffect(() => {
-    if (!showResourceGains || !resourceGains.length || !humanPlayer) return;
+    if (!showResourceGains || !resourceGains.length || !currentPlayer) return;
 
-    const humanGains = resourceGains.filter(g => g.playerName === humanPlayer.name);
-    if (humanGains.length === 0) return;
+    const playerGains = resourceGains.filter(g => g.playerId === currentPlayer.id);
+    if (playerGains.length === 0) return;
 
-    const newPopups = humanGains.map(g => ({
+    const newPopups = playerGains.map(g => ({
       id: `${Date.now()}-${Math.random()}-${g.resource}`,
       resource: g.resource,
       amount: g.amount,
       playerName: g.playerName,
-      isHumanPlayer: true,
     }));
 
     setPopups(prev => [...prev, ...newPopups]);
 
-    // Remove after animation
     setTimeout(() => {
       setPopups(prev => prev.filter(p => !newPopups.some(np => np.id === p.id)));
     }, 2500);
-  }, [showResourceGains, resourceGains, humanPlayer]);
+  }, [showResourceGains, resourceGains, currentPlayer?.id]);
 
   if (popups.length === 0) return null;
 

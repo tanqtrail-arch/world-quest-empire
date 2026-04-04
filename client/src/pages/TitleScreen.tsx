@@ -2,11 +2,12 @@
  * TitleScreen - トップ画面
  * Design: ポップ冒険RPGスタイル
  * - タイトルバナー画像を大きく表示
- * - 大きなゲームボタン（ゲームを作る、参加する、ルール）
+ * - 大きなゲームボタン（ゲームを作る、ルール）
  * - 木目フレーム + 海の背景
  */
 import { useGameStore } from '@/lib/gameStore';
 import { motion } from 'framer-motion';
+import { toast } from 'sonner';
 
 const HERO_BG = 'https://d2xsxph8kpxj0f.cloudfront.net/310519663286960690/RthryRhRZNJvzXLKUFJiBd/hero-bg-JDykZ5tdFBU7vL2qTmUcmb.webp';
 const TITLE_BANNER = 'https://d2xsxph8kpxj0f.cloudfront.net/310519663286960690/RthryRhRZNJvzXLKUFJiBd/title-banner-JMEVasTGYkPM5xtrDuLWqd.webp';
@@ -67,14 +68,7 @@ export default function TitleScreen() {
         </button>
 
         <button
-          onClick={() => setScreen('join')}
-          className="game-btn-blue text-xl py-4 rounded-2xl"
-        >
-          🚀 ゲームにさんかする
-        </button>
-
-        <button
-          onClick={() => setScreen('rules')}
+          onClick={() => toast('📖 ルールはゲーム中にヘルプボタン(?)から確認できます！')}
           className="game-btn-gold text-xl py-4 rounded-2xl"
         >
           📖 ルールをみる

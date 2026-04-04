@@ -1,4 +1,5 @@
 // ===== Game Types & Constants for World Quest Empire =====
+// カタン方式: 頂点に拠点、辺に道を建設。隣接タイルから資源を獲得。
 
 // --- Resource Types ---
 export type ResourceType = 'rubber' | 'oil' | 'gold' | 'food';
@@ -13,13 +14,14 @@ export const RESOURCE_INFO: Record<ResourceType, { name: string; color: string; 
 export type Resources = Record<ResourceType, number>;
 
 // --- Tile Types ---
-export type TileType = ResourceType | 'sea';
+export type TileType = ResourceType | 'desert' | 'sea';
 
 export const TILE_INFO: Record<TileType, { name: string; color: string; bgColor: string }> = {
   rubber: { name: 'ゴム', color: '#27AE60', bgColor: '#2ECC71' },
   oil:    { name: '石油', color: '#2C3E50', bgColor: '#34495E' },
   gold:   { name: '金',   color: '#F1C40F', bgColor: '#F39C12' },
   food:   { name: '食料', color: '#E67E22', bgColor: '#E8A838' },
+  desert: { name: '砂漠', color: '#D4A574', bgColor: '#DEB887' },
   sea:    { name: '海',   color: '#3498DB', bgColor: '#5DADE2' },
 };
 
@@ -30,17 +32,38 @@ export interface GameTile {
   diceNumber: number;
   q: number;
   r: number;
-  structures: Structure[];
 }
 
-// --- Structure ---
-export type StructureType = 'settlement' | 'city' | 'ship';
+// --- Vertex (頂点) - 拠点を建てる場所 ---
+export interface Vertex {
+  id: string;           // "v_q1r1_q2r2_q3r3" format (sorted tile keys)
+  adjacentTileIds: number[];  // 隣接するタイルのID (2-3個)
+  adjacentVertexIds: string[]; // 隣接する頂点のID
+  adjacentEdgeIds: string[];   // 隣接する辺のID
+  x: number;            // 描画用X座標
+  y: number;            // 描画用Y座標
+}
 
-export interface Structure {
+// --- Edge (辺) - 道を建てる場所 ---
+export interface Edge {
+  id: string;           // "e_v1_v2" format (sorted vertex keys)
+  vertexIds: [string, string]; // 両端の頂点ID
+  adjacentTileIds: number[];   // 隣接するタイルのID (1-2個)
+  x1: number; y1: number;     // 描画用始点
+  x2: number; y2: number;     // 描画用終点
+}
+
+// --- Settlement (拠点) - 頂点上に建設 ---
+export interface Settlement {
+  vertexId: string;
   playerId: string;
-  type: StructureType;
-  vertexKey?: string;
-  edgeKey?: string;
+  level: 'settlement' | 'city';  // 拠点 or 都市
+}
+
+// --- Road (道) - 辺上に建設 ---
+export interface Road {
+  edgeId: string;
+  playerId: string;
 }
 
 // --- Player ---
@@ -53,9 +76,10 @@ export interface Player {
   countryName: string;
   resources: Resources;
   victoryPoints: number;
-  structures: Structure[];
-  eventCards: EventCard[];
   isAI: boolean;
+  isHuman: boolean;     // ローカル対戦用: 人間プレイヤーかどうか
+  longestRoadLength: number;
+  eventCards: EventCard[];
 }
 
 // --- Event Card ---
@@ -73,23 +97,38 @@ export interface EventCard {
 
 // --- Game Phase ---
 export type GamePhase = 
+  | 'setup'       // 初期配置フェーズ
   | 'rolling'
   | 'action'
   | 'building'
   | 'trading'
-  | 'expanding'
   | 'event'
   | 'ai_turn'
+  | 'handoff'     // ローカル対戦: 端末渡し画面
   | 'finished';
+
+// --- Setup Sub-Phase ---
+export type SetupStep = 'place_settlement' | 'place_road';
 
 // --- Difficulty ---
 export type Difficulty = 'easy' | 'normal' | 'hard';
+
+// --- Player Slot (ゲーム作成画面用) ---
+export interface PlayerSlot {
+  type: 'human' | 'ai';
+  name: string;
+  countryIndex: number;
+}
 
 // --- Game State ---
 export interface GameState {
   roomId: string;
   players: Player[];
   tiles: GameTile[];
+  vertices: Vertex[];
+  edges: Edge[];
+  settlements: Settlement[];
+  roads: Road[];
   currentPlayerIndex: number;
   currentTurn: number;
   maxTurns: number;
@@ -99,12 +138,21 @@ export interface GameState {
   gameLog: GameLogEntry[];
   currentEvent: EventCard | null;
   winner: Player | null;
+  // Setup phase state
+  setupPhase: {
+    currentPlayerIndex: number;
+    round: number;       // 1 or 2 (each player places 2 settlements)
+    step: SetupStep;
+    lastPlacedVertexId: string | null;
+  } | null;
+  // Longest road tracking
+  longestRoadPlayerId: string | null;
 }
 
 export interface GameLogEntry {
   id: string;
   message: string;
-  type: 'info' | 'resource' | 'build' | 'event' | 'trade' | 'system';
+  type: 'info' | 'resource' | 'build' | 'event' | 'trade' | 'system' | 'road';
   timestamp: number;
   playerId?: string;
 }
@@ -120,25 +168,23 @@ export const PLAYER_COLORS = [
 ];
 
 // --- Build Costs ---
-export const BUILD_COSTS: Record<StructureType, Partial<Resources>> = {
-  settlement: { rubber: 1, food: 1, gold: 1, oil: 1 },
-  city:       { oil: 2, gold: 2, food: 1 },
-  ship:       { rubber: 1, oil: 1 },
+export const BUILD_COSTS = {
+  settlement: { rubber: 1, food: 1, gold: 1, oil: 1 } as Partial<Resources>,
+  city:       { oil: 2, gold: 2, food: 1 } as Partial<Resources>,
+  road:       { rubber: 1, oil: 1 } as Partial<Resources>,
 };
 
-// --- Expand Cost ---
-export const EXPAND_COST: Partial<Resources> = { food: 1, gold: 1 };
-
 // --- Victory Points ---
-export const VP_VALUES: Record<StructureType, number> = {
+export const VP_VALUES = {
   settlement: 1,
   city: 2,
-  ship: 0,
+  road: 0,
+  longestRoad: 2,
 };
 
 // --- Winning Score ---
 export const WINNING_SCORE: Record<Difficulty, number> = {
-  easy: 10,
+  easy: 8,
   normal: 10,
   hard: 12,
 };
@@ -162,11 +208,12 @@ export const TILE_DISTRIBUTION: TileType[] = [
   'rubber', 'rubber', 'rubber', 'rubber',
   'oil', 'oil', 'oil',
   'gold', 'gold', 'gold',
-  'food', 'food', 'food', 'food', 'food',
+  'food', 'food', 'food', 'food',
+  'desert',
   'sea', 'sea', 'sea', 'sea',
 ];
 
-// --- Dice Numbers (excluding 7, distributed across non-sea tiles) ---
+// --- Dice Numbers (excluding 7, distributed across non-sea/non-desert tiles) ---
 export const DICE_NUMBERS = [2, 3, 3, 4, 4, 5, 5, 6, 6, 8, 8, 9, 9, 10, 10, 11, 11, 12];
 
 // --- Event Cards Data ---
@@ -182,5 +229,5 @@ export const EVENT_CARDS: Omit<EventCard, 'id'>[] = [
   { title: '外交成功', description: '他の国と仲良くなった！好きな資源1つゲット！', category: 'positive', effectType: 'gain_resources', effectValue: 1, icon: '🤝' },
   { title: '技術革新', description: '新しい技術を発見！次の建設コストが半分になる。', category: 'positive', effectType: 'discount_build', effectValue: 50, icon: '⚡' },
   { title: '支援物資', description: '友好国から物資が届いた！全資源1つずつゲット！', category: 'positive', effectType: 'gain_all', effectValue: 1, icon: '📦' },
-  { title: '新航路発見', description: '新しい航路を見つけた！船を1つ無料で建設できる！', category: 'positive', effectType: 'free_ship', effectValue: 1, icon: '🧭' },
+  { title: '新航路発見', description: '新しい航路を見つけた！道を1つ無料で建設できる！', category: 'positive', effectType: 'free_road', effectValue: 1, icon: '🧭' },
 ];

@@ -7,13 +7,11 @@
 import { useGameStore } from '@/lib/gameStore';
 import { RESOURCE_INFO, type ResourceType } from '@/lib/gameTypes';
 import { motion, AnimatePresence } from 'framer-motion';
-import { useState } from 'react';
 
 const PARCHMENT_BG = 'https://d2xsxph8kpxj0f.cloudfront.net/310519663286960690/RthryRhRZNJvzXLKUFJiBd/parchment-card-JgM7UV3guuMN7UhEzpwdRd.webp';
 
 export default function EventPopup() {
-  const { currentEvent, phase, resolveEvent, selectResourceForEvent } = useGameStore();
-  const [selectingResource, setSelectingResource] = useState(false);
+  const { currentEvent, phase, handleEvent } = useGameStore();
 
   if (!currentEvent || phase !== 'event') return null;
 
@@ -22,22 +20,6 @@ export default function EventPopup() {
   const bgGradient = isPositive
     ? 'linear-gradient(135deg, #E8F8F5, #D5F5E3)'
     : 'linear-gradient(135deg, #FDEDEC, #F5B7B1)';
-
-  const handleOK = () => {
-    if (currentEvent.effectType === 'gain_resources' && currentEvent.effectValue > 0) {
-      setSelectingResource(true);
-    } else {
-      resolveEvent();
-    }
-  };
-
-  const handleSelectResource = (res: ResourceType) => {
-    selectResourceForEvent(res);
-    // Check if more selections needed
-    if (currentEvent.effectValue <= 1) {
-      setSelectingResource(false);
-    }
-  };
 
   return (
     <AnimatePresence>
@@ -93,49 +75,15 @@ export default function EventPopup() {
               {currentEvent.description}
             </p>
 
-            {/* Resource Selection */}
-            {selectingResource && (
-              <motion.div
-                initial={{ y: 10, opacity: 0 }}
-                animate={{ y: 0, opacity: 1 }}
-                className="mb-4"
-              >
-                <p className="font-heading font-bold text-amber-900 mb-2">
-                  好きな資源を選ぼう！（あと{currentEvent.effectValue}つ）
-                </p>
-                <div className="grid grid-cols-2 gap-2">
-                  {(['rubber', 'oil', 'gold', 'food'] as ResourceType[]).map(res => {
-                    const info = RESOURCE_INFO[res];
-                    return (
-                      <button
-                        key={res}
-                        onClick={() => handleSelectResource(res)}
-                        className="p-3 rounded-xl font-heading font-bold text-white text-lg transition-all hover:scale-105 active:scale-95"
-                        style={{
-                          background: `linear-gradient(180deg, ${info.color}CC, ${info.color})`,
-                          border: `2px solid ${info.color}`,
-                          boxShadow: `0 3px 0 ${info.color}AA`,
-                        }}
-                      >
-                        {info.icon} {info.name}
-                      </button>
-                    );
-                  })}
-                </div>
-              </motion.div>
-            )}
-
             {/* OK Button */}
-            {!selectingResource && (
-              <button
-                onClick={handleOK}
-                className={`w-full text-xl py-3 rounded-xl font-heading font-bold text-white transition-all active:scale-95 ${
-                  isPositive ? 'game-btn-primary' : 'game-btn-danger'
-                }`}
-              >
-                OK
-              </button>
-            )}
+            <button
+              onClick={handleEvent}
+              className={`w-full text-xl py-3 rounded-xl font-heading font-bold text-white transition-all active:scale-95 ${
+                isPositive ? 'game-btn-primary' : 'game-btn-danger'
+              }`}
+            >
+              OK
+            </button>
           </div>
         </motion.div>
       </motion.div>

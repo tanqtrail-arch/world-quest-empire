@@ -1,7 +1,7 @@
 /*
  * PlayerPanel - プレイヤー情報パネル
- * Design: 画面下部に国旗・国名・VP・資源を表示
- * 国旗を大きく表示して、どの国のプレイヤーか一目で分かるように
+ * Design: 画面下部に現在のプレイヤーの国旗・国名・VP・資源を表示
+ * ローカル対戦では現在のターンのプレイヤーを表示
  * 資源が変化した時にパルスアニメーションを表示
  */
 import { useEffect, useRef, useState } from 'react';
@@ -16,12 +16,9 @@ export default function PlayerPanel() {
   const currentPlayerIndex = useGameStore(s => s.currentPlayerIndex);
   const currentTurn = useGameStore(s => s.currentTurn);
   const maxTurns = useGameStore(s => s.maxTurns);
+  const longestRoadPlayerId = useGameStore(s => s.longestRoadPlayerId);
 
-  // Find human player (always show human player's resources)
-  const humanPlayer = players.find(p => !p.isAI);
-  const currentPlayer = players[currentPlayerIndex];
-  // During AI turn, show human player's panel; during human turn, show current player
-  const player = humanPlayer || currentPlayer;
+  const player = players[currentPlayerIndex];
 
   // Track previous resource values for change detection
   const prevResources = useRef<Record<ResourceType, number>>({
@@ -41,7 +38,6 @@ export default function PlayerPanel() {
 
     if (changed.size > 0) {
       setChangedResources(changed);
-      // Clear the animation after a delay
       const timer = setTimeout(() => {
         setChangedResources(new Set());
       }, 1200);
@@ -51,16 +47,18 @@ export default function PlayerPanel() {
     }
 
     prevResources.current = { ...player.resources };
-  }, [player?.resources.rubber, player?.resources.oil, player?.resources.gold, player?.resources.food]);
+  }, [player?.resources.rubber, player?.resources.oil, player?.resources.gold, player?.resources.food, player?.id]);
 
   if (!player) return null;
+
+  const hasLongestRoad = longestRoadPlayerId === player.id;
 
   return (
     <div
       className="rounded-t-2xl px-3 py-2 shadow-[0_-4px_20px_rgba(0,0,0,0.3)]"
       style={{
         background: 'linear-gradient(180deg, #8B6914 0%, #6B4E12 50%, #5A3E0E 100%)',
-        borderTop: '3px solid #D4AC6E',
+        borderTop: `3px solid ${player.color}`,
       }}
     >
       {/* Player Info Row */}
@@ -77,11 +75,16 @@ export default function PlayerPanel() {
             {player.flagEmoji}
           </div>
           <div>
-            <div className="text-white font-heading font-bold text-lg leading-tight">
+            <div className="text-white font-heading font-bold text-lg leading-tight flex items-center gap-1.5">
               {player.countryName}
+              {player.isAI && <span className="text-[10px] bg-white/20 px-1.5 py-0.5 rounded text-amber-200">AI</span>}
+              {player.isHuman && <span className="text-[10px] bg-blue-500/50 px-1.5 py-0.5 rounded text-blue-100">👤</span>}
             </div>
-            <div className="text-amber-200/80 text-xs font-heading">
+            <div className="text-amber-200/80 text-xs font-heading flex items-center gap-1">
               {player.name}
+              {hasLongestRoad && (
+                <span className="text-[9px] bg-yellow-500/30 px-1 rounded text-yellow-300">🛤️最長の道</span>
+              )}
             </div>
           </div>
         </div>

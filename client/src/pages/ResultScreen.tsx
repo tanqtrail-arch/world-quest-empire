@@ -15,7 +15,7 @@ const reflectionQuestions = [
 ];
 
 export default function ResultScreen() {
-  const { winner, players, currentTurn, setScreen, gameLog } = useGameStore();
+  const { winner, players, currentTurn, setScreen, gameLog, settlements, roads, longestRoadPlayerId } = useGameStore();
 
   const sortedPlayers = [...players].sort((a, b) => b.victoryPoints - a.victoryPoints);
   const eventCount = gameLog.filter(l => l.type === 'event').length;
@@ -66,41 +66,51 @@ export default function ResultScreen() {
             📊 けっか
           </h2>
           <div className="flex flex-col gap-2">
-            {sortedPlayers.map((player, i) => (
-              <div
-                key={player.id}
-                className="flex items-center gap-3 p-2 rounded-lg"
-                style={{
-                  background: i === 0 ? 'linear-gradient(90deg, #F1C40F20, transparent)' : undefined,
-                  border: i === 0 ? '2px solid #F1C40F' : '1px solid #D4AC6E40',
-                }}
-              >
-                <div className="font-score text-2xl font-bold text-amber-800 w-8 text-center">
-                  {i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}`}
-                </div>
-                <span className="text-xl">{player.flagEmoji}</span>
-                <div className="flex-1">
-                  <div className="font-heading font-bold text-amber-900">
-                    {player.name}
-                    <span className="text-xs text-amber-700 ml-1">({player.countryName})</span>
+            {sortedPlayers.map((player, i) => {
+              const playerSettlements = settlements.filter(s => s.playerId === player.id && s.level === 'settlement').length;
+              const playerCities = settlements.filter(s => s.playerId === player.id && s.level === 'city').length;
+              const playerRoads = roads.filter(r => r.playerId === player.id).length;
+              const hasLongestRoad = longestRoadPlayerId === player.id;
+
+              return (
+                <div
+                  key={player.id}
+                  className="flex items-center gap-3 p-2 rounded-lg"
+                  style={{
+                    background: i === 0 ? 'linear-gradient(90deg, #F1C40F20, transparent)' : undefined,
+                    border: i === 0 ? '2px solid #F1C40F' : '1px solid #D4AC6E40',
+                  }}
+                >
+                  <div className="font-score text-2xl font-bold text-amber-800 w-8 text-center">
+                    {i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}`}
                   </div>
-                  <div className="text-xs text-amber-700 flex gap-2">
-                    <span>🌿{player.resources.rubber}</span>
-                    <span>🛢️{player.resources.oil}</span>
-                    <span>💰{player.resources.gold}</span>
-                    <span>🌾{player.resources.food}</span>
-                    <span>🏠{player.structures.filter(s => s.type === 'settlement').length}</span>
-                    <span>🏰{player.structures.filter(s => s.type === 'city').length}</span>
+                  <span className="text-xl">{player.flagEmoji}</span>
+                  <div className="flex-1">
+                    <div className="font-heading font-bold text-amber-900">
+                      {player.name}
+                      <span className="text-xs text-amber-700 ml-1">({player.countryName})</span>
+                      {player.isAI && <span className="text-[9px] text-amber-600 ml-1">AI</span>}
+                    </div>
+                    <div className="text-xs text-amber-700 flex gap-2 flex-wrap">
+                      <span>🌿{player.resources.rubber}</span>
+                      <span>🛢️{player.resources.oil}</span>
+                      <span>💰{player.resources.gold}</span>
+                      <span>🌾{player.resources.food}</span>
+                      <span>🏠{playerSettlements}</span>
+                      <span>🏰{playerCities}</span>
+                      <span>🛤️{playerRoads}</span>
+                      {hasLongestRoad && <span className="text-yellow-600">🏅最長の道</span>}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <span className="text-yellow-500">★</span>
+                    <span className="font-score text-2xl font-bold text-amber-900">
+                      {player.victoryPoints}
+                    </span>
                   </div>
                 </div>
-                <div className="flex items-center gap-1">
-                  <span className="text-yellow-500">★</span>
-                  <span className="font-score text-2xl font-bold text-amber-900">
-                    {player.victoryPoints}
-                  </span>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </motion.div>
 

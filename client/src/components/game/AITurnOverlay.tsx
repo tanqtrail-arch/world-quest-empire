@@ -13,8 +13,9 @@ const ACTION_DURATIONS: Record<AIAction['type'], number> = {
   dice_roll: 2200,
   resource_gain: 1500,
   no_resource: 1200,
-  build: 1800,
-  upgrade: 1800,
+  build_settlement: 1800,
+  upgrade_city: 1800,
+  build_road: 1500,
   turn_end: 800,
 };
 
@@ -140,7 +141,32 @@ function ActionContent({ action }: { action: AIAction }) {
         </div>
       );
 
-    case 'build':
+    case 'build_road':
+      return (
+        <div className="text-center py-2">
+          <div className="text-sm text-amber-700 font-bold mb-2">
+            {action.playerFlag} {action.playerName}
+          </div>
+          <motion.div
+            initial={{ x: -30, opacity: 0 }}
+            animate={{ x: 0, opacity: 1 }}
+            transition={{ type: 'spring', stiffness: 200 }}
+            className="text-5xl mb-3"
+          >
+            🛤️
+          </motion.div>
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 0.3 }}
+            className="text-xl font-heading font-bold text-amber-900"
+          >
+            道を建設した！
+          </motion.div>
+        </div>
+      );
+
+    case 'build_settlement':
       return (
         <div className="text-center py-2">
           <div className="text-sm text-amber-700 font-bold mb-2">
@@ -152,7 +178,7 @@ function ActionContent({ action }: { action: AIAction }) {
             transition={{ type: 'spring', stiffness: 200 }}
             className="text-5xl mb-3"
           >
-            {action.buildType === '拠点' ? '🏠' : action.buildType === '船' ? '⛵' : '🏗️'}
+            🏠
           </motion.div>
           <motion.div
             initial={{ opacity: 0 }}
@@ -160,12 +186,12 @@ function ActionContent({ action }: { action: AIAction }) {
             transition={{ delay: 0.3 }}
             className="text-xl font-heading font-bold text-amber-900"
           >
-            {action.buildType}を建設した！
+            拠点を建設した！
           </motion.div>
         </div>
       );
 
-    case 'upgrade':
+    case 'upgrade_city':
       return (
         <div className="text-center py-2">
           <div className="text-sm text-amber-700 font-bold mb-2">
@@ -220,7 +246,6 @@ export default function AITurnOverlay() {
     // Start the queue playback
     if (!startedRef.current && !currentAIAction && aiQueueLength > 0) {
       startedRef.current = true;
-      // Play first action
       useGameStore.getState().playNextAIAction();
     }
   }, [phase, isPlayingAI, currentAIAction, aiQueueLength]);
@@ -236,7 +261,7 @@ export default function AITurnOverlay() {
       if (state.aiActionQueue.length > 0) {
         state.playNextAIAction();
       } else {
-        // All done - return to human player
+        // All done
         startedRef.current = false;
         if (state.winner) {
           useGameStore.setState({
@@ -248,13 +273,28 @@ export default function AITurnOverlay() {
             highlightedTileIds: [],
           });
         } else {
-          useGameStore.setState({
-            phase: 'rolling',
-            isPlayingAI: false,
-            currentAIAction: null,
-            aiActionQueue: [],
-            highlightedTileIds: [],
-          });
+          // Check if next player is human (local multiplayer handoff)
+          const nextIdx = state.currentPlayerIndex;
+          const nextPlayer = state.players[nextIdx];
+          if (nextPlayer && nextPlayer.isHuman) {
+            // Show handoff screen
+            useGameStore.setState({
+              phase: 'handoff',
+              isPlayingAI: false,
+              currentAIAction: null,
+              aiActionQueue: [],
+              highlightedTileIds: [],
+              handoffPlayerIndex: nextIdx,
+            });
+          } else {
+            useGameStore.setState({
+              phase: 'rolling',
+              isPlayingAI: false,
+              currentAIAction: null,
+              aiActionQueue: [],
+              highlightedTileIds: [],
+            });
+          }
         }
       }
     }, duration);

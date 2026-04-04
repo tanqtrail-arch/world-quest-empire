@@ -1,43 +1,51 @@
 /*
  * ActionMenu - 行動メニュー
  * Design: 画面下部の大きなアクションボタン群
- * - 建設する → タイルをタップして場所を選ぶ
+ * - 建設する → 拠点/道/都市を選択 → マップ上で位置を選択
  * - 交換する → 資源交換パネル
  * - ターン終了
  */
 import { useGameStore } from '@/lib/gameStore';
 import { BUILD_COSTS, RESOURCE_INFO, type ResourceType } from '@/lib/gameTypes';
-import { canAfford } from '@/lib/gameLogic';
+import { canAfford, getUpgradeableVertices, getValidSettlementVertices, getValidRoadEdges } from '@/lib/gameLogic';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useState } from 'react';
-import { Hammer, Ship, ArrowRightLeft, SkipForward, X } from 'lucide-react';
+import { Hammer, ArrowRightLeft, SkipForward, X, Check } from 'lucide-react';
 
 export default function ActionMenu() {
-  const { phase, players, currentPlayerIndex, doEndTurn, tiles, buildMode, setBuildMode, clearSelection } = useGameStore();
+  const {
+    phase, players, currentPlayerIndex, doEndTurn,
+    buildMode, startBuild, cancelBuild, confirmBuild,
+    selectedVertexId, selectedEdgeId,
+    vertices, edges, settlements, roads,
+  } = useGameStore();
   const [showBuild, setShowBuild] = useState(false);
   const [showTrade, setShowTrade] = useState(false);
 
   const player = players[currentPlayerIndex];
   if (!player || phase !== 'action') return null;
 
-  const canBuildSettlement = canAfford(player, BUILD_COSTS.settlement);
-  const canBuildCity = canAfford(player, BUILD_COSTS.city);
-  const canBuildShip = canAfford(player, BUILD_COSTS.ship);
+  const canBuildSettlementAfford = canAfford(player, BUILD_COSTS.settlement);
+  const canBuildCityAfford = canAfford(player, BUILD_COSTS.city);
+  const canBuildRoadAfford = canAfford(player, BUILD_COSTS.road);
 
-  // Check if there are tiles to upgrade
-  const hasUpgradableTiles = tiles.some(t =>
-    t.structures.some(s => s.playerId === player.id && s.type === 'settlement')
-  );
+  // Check if there are valid positions
+  const hasValidSettlements = getValidSettlementVertices(player.id, vertices, settlements, roads, false).length > 0;
+  const hasValidRoads = getValidRoadEdges(player.id, edges, vertices, settlements, roads, false).length > 0;
+  const hasUpgradeableSettlements = getUpgradeableVertices(player.id, settlements).length > 0;
 
-  const handleSelectBuildType = (type: 'settlement' | 'city' | 'ship') => {
-    setBuildMode(type);
+  const handleSelectBuildType = (type: 'settlement' | 'city' | 'road') => {
+    startBuild(type);
     setShowBuild(false);
   };
 
   const handleCancelBuild = () => {
-    clearSelection();
+    cancelBuild();
     setShowBuild(false);
   };
+
+  const hasSelection = (buildMode === 'settlement' || buildMode === 'city') && selectedVertexId
+    || buildMode === 'road' && selectedEdgeId;
 
   return (
     <div className="px-2 pb-2">
@@ -52,25 +60,35 @@ export default function ActionMenu() {
           >
             <div className="flex items-center gap-2">
               <span className="text-2xl">
-                {buildMode === 'settlement' ? '🏠' : buildMode === 'city' ? '🏰' : '⛵'}
+                {buildMode === 'settlement' ? '🏠' : buildMode === 'city' ? '🏰' : '🛤️'}
               </span>
               <div>
                 <div className="font-heading font-bold text-amber-900 text-sm">
-                  {buildMode === 'settlement' ? '拠点を建てる場所を選ぼう！' :
+                  {buildMode === 'settlement' ? '拠点を建てる頂点を選ぼう！' :
                    buildMode === 'city' ? 'アップグレードする拠点を選ぼう！' :
-                   '船を置く場所を選ぼう！'}
+                   '道を建てる辺を選ぼう！'}
                 </div>
                 <div className="text-xs text-amber-700">
-                  光っているタイルをタップしてね
+                  光っている場所をタップしてね
                 </div>
               </div>
             </div>
-            <button
-              onClick={handleCancelBuild}
-              className="bg-red-500 text-white rounded-full p-1.5 hover:bg-red-600 transition-colors"
-            >
-              <X size={16} />
-            </button>
+            <div className="flex gap-1.5">
+              {hasSelection && (
+                <button
+                  onClick={confirmBuild}
+                  className="bg-emerald-500 text-white rounded-full p-1.5 hover:bg-emerald-600 transition-colors"
+                >
+                  <Check size={16} />
+                </button>
+              )}
+              <button
+                onClick={handleCancelBuild}
+                className="bg-red-500 text-white rounded-full p-1.5 hover:bg-red-600 transition-colors"
+              >
+                <X size={16} />
+              </button>
+            </div>
           </motion.div>
         )}
       </AnimatePresence>
@@ -89,28 +107,28 @@ export default function ActionMenu() {
             </h3>
             <div className="flex flex-col gap-2">
               <BuildOption
+                label="🛤️ 道"
+                cost="ゴム1・石油1"
+                points="道"
+                enabled={canBuildRoadAfford && hasValidRoads}
+                description="道をつなげて新しい場所に拠点を建てよう！"
+                onClick={() => handleSelectBuildType('road')}
+              />
+              <BuildOption
                 label="🏠 拠点"
                 cost="ゴム1・食料1・金1・石油1"
                 points="+1点"
-                enabled={canBuildSettlement}
-                description="タイルに拠点を建てると、サイコロの出目が合うとき資源がもらえるよ！"
+                enabled={canBuildSettlementAfford && hasValidSettlements}
+                description="頂点に拠点を建てると、隣のタイルから資源がもらえる！"
                 onClick={() => handleSelectBuildType('settlement')}
               />
               <BuildOption
                 label="🏰 都市"
                 cost="石油2・金2・食料1"
-                points="+2点"
-                enabled={canBuildCity && hasUpgradableTiles}
+                points="+1点"
+                enabled={canBuildCityAfford && hasUpgradeableSettlements}
                 description="拠点を都市にすると、資源が2倍もらえるよ！"
                 onClick={() => handleSelectBuildType('city')}
-              />
-              <BuildOption
-                label="⛵ 船"
-                cost="ゴム1・石油1"
-                points="進出用"
-                enabled={canBuildShip}
-                description="海に船を出して、新しい土地に進出しよう！"
-                onClick={() => handleSelectBuildType('ship')}
               />
               <button
                 onClick={() => setShowBuild(false)}

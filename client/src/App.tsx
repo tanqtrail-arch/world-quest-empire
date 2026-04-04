@@ -7,8 +7,6 @@ import { useGameStore } from "./lib/gameStore";
 // Pages
 import TitleScreen from "./pages/TitleScreen";
 import CreateRoom from "./pages/CreateRoom";
-import JoinRoom from "./pages/JoinRoom";
-import RulesScreen from "./pages/RulesScreen";
 import GameScreen from "./pages/GameScreen";
 import ResultScreen from "./pages/ResultScreen";
 
@@ -20,10 +18,6 @@ function ScreenRouter() {
       return <TitleScreen />;
     case 'create':
       return <CreateRoom />;
-    case 'join':
-      return <JoinRoom />;
-    case 'rules':
-      return <RulesScreen />;
     case 'game':
       return <GameScreen />;
     case 'result':
