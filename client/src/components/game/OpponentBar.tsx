@@ -95,7 +95,7 @@ export default function OpponentBar() {
   }, [showResourceGains, resourceGains]);
 
   return (
-    <div className="flex gap-1.5 px-2 py-1.5 overflow-x-auto">
+    <div className="flex gap-1.5 md:gap-1.5 px-2 md:px-3 py-1.5 md:py-1 overflow-x-auto">
       {opponents.map(opp => {
         const isActive = isPlayingAI && currentAIAction?.playerId === opp.id;
         const playerPopups = popups.filter(p => p.playerId === opp.id);
@@ -109,7 +109,7 @@ export default function OpponentBar() {
               boxShadow: [`0 0 0px ${opp.color}`, `0 0 16px ${opp.color}`, `0 0 0px ${opp.color}`],
             } : { scale: 1 }}
             transition={isActive ? { duration: 1.5, repeat: Infinity } : {}}
-            className="relative flex items-center gap-1.5 rounded-xl px-2 py-1.5 shrink-0 transition-all duration-300"
+            className="relative flex items-center gap-1.5 md:gap-1.5 rounded-xl px-2 md:px-2 py-1.5 md:py-1 shrink-0 transition-all duration-300"
             style={{
               background: isActive ? `${opp.color}44` : 'rgba(0,0,0,0.55)',
               backdropFilter: 'blur(4px)',
@@ -118,7 +118,7 @@ export default function OpponentBar() {
           >
             {/* Flag */}
             <div
-              className="w-9 h-9 rounded-lg flex items-center justify-center text-xl shrink-0"
+              className="w-9 h-9 md:w-7 md:h-7 rounded-lg flex items-center justify-center text-xl md:text-base shrink-0"
               style={{
                 background: `${opp.color}33`,
                 border: `1.5px solid ${opp.color}`,
@@ -126,7 +126,7 @@ export default function OpponentBar() {
             >
               {opp.flagEmoji}
             </div>
-            <div className="text-white text-xs font-heading leading-tight">
+            <div className="text-white text-xs md:text-[11px] font-heading leading-tight">
               <div className="font-bold flex items-center gap-1">
                 {opp.countryName}
                 {opp.isAI && <span className="text-[9px] text-white/50">AI</span>}
@@ -149,8 +149,12 @@ export default function OpponentBar() {
                     return (
                       <motion.span
                         key={res}
-                        animate={isResChanged ? { scale: [1, 1.4, 1], color: ['#ffffff99', '#FFD700', '#ffffff99'] } : {}}
-                        transition={{ duration: 0.5 }}
+                        animate={isResChanged ? {
+                          scale: [1, 1.5, 1.2, 1],
+                          color: ['#ffffff99', '#FFD700', '#FFEE58', '#ffffff99'],
+                          textShadow: ['none', '0 0 8px #FFD700', '0 0 4px #FFD700', 'none'],
+                        } : {}}
+                        transition={{ duration: 0.8 }}
                         className="inline-block"
                       >
                         {RESOURCE_INFO[res].icon}{opp.resources[res]}

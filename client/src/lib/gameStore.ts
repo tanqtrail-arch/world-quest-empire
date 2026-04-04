@@ -5,10 +5,10 @@ import {
   type Settlement, type Road, type Resources, type ResourceType,
   type EventCard, type GameLogEntry, type Difficulty, type GamePhase,
   type SetupStep, type PlayerSlot,
-  BUILD_COSTS, VP_VALUES, WINNING_SCORE, PLAYER_COLORS,
+  BUILD_COSTS, VP_VALUES, WINNING_SCORE, PLAYER_COLORS, RESOURCE_INFO,
 } from './gameTypes';
 import {
-  generateMap, generateVerticesAndEdges, createPlayer, rollDice,
+  generateMap, generateVerticesAndEdges, getMapRows, createPlayer, rollDice,
   distributeResourcesWithVertices, canAfford, payCost,
   canBuildSettlement, canBuildRoad, getValidSettlementVertices,
   getValidRoadEdges, getUpgradeableVertices, calculateLongestRoad,
@@ -19,7 +19,7 @@ import {
 
 // --- AI Action Types ---
 export interface AIAction {
-  type: 'turn_start' | 'dice_roll' | 'resource_gain' | 'no_resource' | 'build_road' | 'build_settlement' | 'upgrade_city' | 'turn_end';
+  type: 'turn_start' | 'dice_roll' | 'resource_gain' | 'dice_gains' | 'lucky_seven' | 'no_resource' | 'build_road' | 'build_settlement' | 'upgrade_city' | 'event' | 'turn_end';
   playerId: string;
   playerName: string;
   playerFlag: string;
@@ -32,6 +32,15 @@ export interface AIAction {
   edgeId?: string;
   vertexId?: string;
   buildType?: string;
+  costText?: string;
+  gainsSummary?: string;
+  tradeFrom?: ResourceType;
+  tradeTo?: ResourceType;
+  diceGains?: { playerId: string; resource: ResourceType; amount: number }[];
+  eventTitle?: string;
+  eventIcon?: string;
+  eventCategory?: 'positive' | 'negative';
+  eventDetail?: string;
 }
 
 // --- Resource Gain Popup ---
@@ -46,7 +55,7 @@ interface ResourceGainPopup {
 
 // --- Game Store Interface ---
 interface GameStore {
-  screen: 'title' | 'create' | 'game' | 'result';
+  screen: 'title' | 'create' | 'game' | 'result' | 'ranking';
   setScreen: (screen: GameStore['screen']) => void;
 
   // Game state
@@ -56,6 +65,7 @@ interface GameStore {
   edges: Edge[];
   settlements: Settlement[];
   roads: Road[];
+  mapRows: number[];
   currentPlayerIndex: number;
   currentTurn: number;
   maxTurns: number;
@@ -93,6 +103,9 @@ interface GameStore {
   aiActionQueue: AIAction[];
   currentAIAction: AIAction | null;
 
+  // Resource pick mode (for gain_resources event)
+  resourcePickMode: { remaining: number; eventTitle: string } | null;
+
   // Handoff (local multiplayer)
   handoffPlayerIndex: number | null;
 
@@ -107,6 +120,7 @@ interface GameStore {
   confirmBuild: () => void;
   doTrade: (give: ResourceType, receive: ResourceType) => void;
   handleEvent: () => void;
+  pickResource: (resource: ResourceType) => void;
   doEndTurn: () => void;
   playNextAIAction: () => void;
   getCurrentPlayer: () => Player;
@@ -128,6 +142,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
   edges: [],
   settlements: [],
   roads: [],
+  mapRows: [3, 4, 5, 4, 3],
   currentPlayerIndex: 0,
   currentTurn: 1,
   maxTurns: 20,
@@ -141,6 +156,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
   longestRoadPlayerId: null,
 
   setupPhase: null,
+  resourcePickMode: null,
 
   buildMode: null,
   selectedVertexId: null,
@@ -162,8 +178,9 @@ export const useGameStore = create<GameStore>((set, get) => ({
   // INIT GAME
   // =============================================
   initGame: (slots, difficulty) => {
-    const tiles = generateMap();
-    const { vertices, edges } = generateVerticesAndEdges(tiles);
+    const mapRows = getMapRows(slots.length);
+    const tiles = generateMap(slots.length);
+    const { vertices, edges } = generateVerticesAndEdges(tiles, mapRows);
 
     const players = slots.map((slot, i) => {
       const colorInfo = PLAYER_COLORS[slot.countryIndex % PLAYER_COLORS.length];
@@ -190,6 +207,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
       edges,
       settlements: [],
       roads: [],
+      mapRows,
       currentPlayerIndex: 0,
       currentTurn: 1,
       maxTurns,
@@ -201,6 +219,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
       pendingEvent: null,
       winner: null,
       longestRoadPlayerId: null,
+      resourcePickMode: null,
       setupPhase: {
         currentPlayerIndex: 0,
         round: 1,
@@ -245,7 +264,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
     if (isAI || vertexId === '__auto_ai__') {
       // AI auto-picks
       chosenVertexId = aiChooseSetupVertex(
-        player.id, state.tiles, state.vertices, state.settlements, state.roads
+        player.id, state.tiles, state.vertices, state.settlements, state.roads, state.difficulty
       ) || '';
       if (!chosenVertexId) return;
     }
@@ -407,31 +426,48 @@ export const useGameStore = create<GameStore>((set, get) => ({
     ];
 
     // Distribute resources
-    const gains = distributeResourcesWithVertices(
-      state.tiles, state.vertices, state.settlements, state.players, total
-    );
-
     const newPlayers = state.players.map(p => ({ ...p, resources: { ...p.resources } }));
     const resourceGainPopups: ResourceGainPopup[] = [];
 
-    gains.forEach(g => {
-      const player = newPlayers.find(p => p.id === g.playerId);
-      if (!player) return;
-      player.resources[g.resource] += g.amount;
-      const resName = g.resource === 'rubber' ? 'ゴム' : g.resource === 'oil' ? '石油' : g.resource === 'gold' ? '金' : '食料';
-      logs.push(generateGameLog(`${player.name}が${resName}を${g.amount}つゲット！`, 'resource', player.id));
+    if (total === 7) {
+      // Lucky 7: current player gains +1 of all resources (single popup)
+      const player = newPlayers.find(p => p.id === currentPlayer.id)!;
+      const allRes: ResourceType[] = ['rubber', 'oil', 'gold', 'food'];
+      allRes.forEach(res => { player.resources[res] += 1; });
+      logs.push(generateGameLog(`🎲7！${player.name}が全資源+1！`, 'resource', player.id));
+      // Single popup entry — resource_gain handler checks for allResources flag
       resourceGainPopups.push({
         playerId: player.id,
         playerName: player.name,
         playerFlag: player.flagEmoji,
         playerColor: player.color,
-        resource: g.resource,
-        amount: g.amount,
+        resource: 'rubber', // placeholder, display uses allResources flag
+        amount: 1,
       });
-    });
+    } else {
+      const gains = distributeResourcesWithVertices(
+        state.tiles, state.vertices, state.settlements, state.players, total
+      );
 
-    if (gains.length === 0) {
-      logs.push(generateGameLog(`出目${total}では誰も資源をもらえなかった。`, 'info'));
+      gains.forEach(g => {
+        const player = newPlayers.find(p => p.id === g.playerId);
+        if (!player) return;
+        player.resources[g.resource] += g.amount;
+        const resName = RESOURCE_INFO[g.resource].icon + RESOURCE_INFO[g.resource].name;
+        logs.push(generateGameLog(`${player.name}が${resName}+${g.amount}`, 'resource', player.id));
+        resourceGainPopups.push({
+          playerId: player.id,
+          playerName: player.name,
+          playerFlag: player.flagEmoji,
+          playerColor: player.color,
+          resource: g.resource,
+          amount: g.amount,
+        });
+      });
+
+      if (gains.length === 0) {
+        logs.push(generateGameLog(`出目${total}では誰も資源をもらえなかった。`, 'info'));
+      }
     }
 
     // Highlight matching tiles
@@ -439,12 +475,12 @@ export const useGameStore = create<GameStore>((set, get) => ({
       .filter(t => t.diceNumber === total && t.type !== 'sea' && t.type !== 'desert')
       .map(t => t.id);
 
-    // Check for event
-    const event = getRandomEvent(state.difficulty);
+    // Event only on 7
+    const event = total === 7 ? getRandomEvent(state.difficulty) : null;
 
     set({
       diceResult: dice,
-      phase: event ? 'action' : 'action',
+      phase: 'action',
       players: newPlayers,
       gameLog: [...state.gameLog, ...logs],
       highlightedTileIds: matchingTileIds,
@@ -486,8 +522,10 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
     if (type === 'settlement') {
       const validVertices = getValidSettlementVertices(
-        player.id, state.vertices, state.settlements, state.roads, false
+        player.id, state.vertices, state.settlements, state.roads, false, state.difficulty
       );
+      const playerRoads = state.roads.filter(r => r.playerId === player.id);
+      console.log(`[startBuild] settlement: ${validVertices.length} valid, roads=${playerRoads.length}, difficulty=${state.difficulty}`);
       set({
         buildMode: 'settlement',
         highlightedVertexIds: validVertices,
@@ -499,6 +537,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
       const validEdges = getValidRoadEdges(
         player.id, state.edges, state.vertices, state.settlements, state.roads, false
       );
+      console.log(`[startBuild] road: ${validEdges.length} valid edges, resources:`, player.resources);
       set({
         buildMode: 'road',
         highlightedEdgeIds: validEdges,
@@ -508,6 +547,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
       });
     } else if (type === 'city') {
       const upgradeableVertices = getUpgradeableVertices(player.id, state.settlements);
+      console.log(`[startBuild] city: ${upgradeableVertices.length} upgradeable, resources:`, player.resources);
       set({
         buildMode: 'city',
         highlightedVertexIds: upgradeableVertices,
@@ -604,9 +644,10 @@ export const useGameStore = create<GameStore>((set, get) => ({
         gameLog: [...state.gameLog, ...logs],
       });
 
-      // Check win
-      if (updatedPlayer.victoryPoints >= WINNING_SCORE[state.difficulty]) {
-        set({ phase: 'finished', winner: updatedPlayer });
+      // Check win (settlement or longest road may push over threshold)
+      const winnerAfterBuild = newPlayers.find(p => p.victoryPoints >= WINNING_SCORE[state.difficulty]);
+      if (winnerAfterBuild) {
+        set({ phase: 'finished', winner: winnerAfterBuild, screen: 'result' });
       }
 
     } else if (state.buildMode === 'road' && state.selectedEdgeId) {
@@ -657,6 +698,12 @@ export const useGameStore = create<GameStore>((set, get) => ({
         gameLog: [...state.gameLog, ...logs],
       });
 
+      // Check win (longest road bonus may push over threshold)
+      const winnerAfterRoad = newPlayers.find(p => p.victoryPoints >= WINNING_SCORE[state.difficulty]);
+      if (winnerAfterRoad) {
+        set({ phase: 'finished', winner: winnerAfterRoad, screen: 'result' });
+      }
+
     } else if (state.buildMode === 'city' && state.selectedVertexId) {
       if (!canAfford(player, BUILD_COSTS.city)) return;
 
@@ -685,8 +732,9 @@ export const useGameStore = create<GameStore>((set, get) => ({
         gameLog: [...state.gameLog, ...logs],
       });
 
-      if (updatedPlayer.victoryPoints >= WINNING_SCORE[state.difficulty]) {
-        set({ phase: 'finished', winner: updatedPlayer });
+      const winnerAfterCity = newPlayers.find(p => p.victoryPoints >= WINNING_SCORE[state.difficulty]);
+      if (winnerAfterCity) {
+        set({ phase: 'finished', winner: winnerAfterCity, screen: 'result' });
       }
     }
   },
@@ -731,39 +779,126 @@ export const useGameStore = create<GameStore>((set, get) => ({
     const newPlayers = state.players.map(p => ({ ...p, resources: { ...p.resources } }));
     const updatedPlayer = newPlayers.find(p => p.id === player.id)!;
     const newSettlements = [...state.settlements];
+    const newRoads = [...state.roads];
 
-    // Apply event effects inline
+    // Apply event effects
     const event = state.currentEvent;
-    let resultMsg = `${event.title}: ${event.description}`;
-    if (event.effectType === 'lose_resource') {
-      const resources: ResourceType[] = ['rubber', 'oil', 'gold', 'food'];
+    const resources: ResourceType[] = ['rubber', 'oil', 'gold', 'food'];
+    const resName = (r: ResourceType) => r === 'rubber' ? 'ゴム' : r === 'oil' ? '石油' : r === 'gold' ? '金' : '食料';
+    let resultMsg = '';
+    let skipAction = false;
+
+    if (event.effectType === 'lose_resources') {
+      // Lose effectValue of a random resource
       const res = resources[Math.floor(Math.random() * resources.length)];
       const loss = Math.min(updatedPlayer.resources[res], event.effectValue);
       updatedPlayer.resources[res] -= loss;
-      const resName = res === 'rubber' ? 'ゴム' : res === 'oil' ? '石油' : res === 'gold' ? '金' : '食料';
-      resultMsg = `${event.title}: ${resName}を${loss}つ失った！`;
-    } else if (event.effectType === 'gain_resource') {
-      const resources: ResourceType[] = ['rubber', 'oil', 'gold', 'food'];
-      const res = resources[Math.floor(Math.random() * resources.length)];
-      updatedPlayer.resources[res] += event.effectValue;
-      const resName = res === 'rubber' ? 'ゴム' : res === 'oil' ? '石油' : res === 'gold' ? '金' : '食料';
-      resultMsg = `${event.title}: ${resName}を${event.effectValue}つ獲得！`;
-    } else if (event.effectType === 'lose_all_resource') {
-      const resources: ResourceType[] = ['rubber', 'oil', 'gold', 'food'];
-      const res = resources[Math.floor(Math.random() * resources.length)];
-      const loss = updatedPlayer.resources[res];
-      updatedPlayer.resources[res] = 0;
-      const resName = res === 'rubber' ? 'ゴム' : res === 'oil' ? '石油' : res === 'gold' ? '金' : '食料';
-      resultMsg = `${event.title}: ${resName}を全て失った！(${loss}個)`;
+      resultMsg = `${event.title}: ${resName(res)}を${loss}つ失った！`;
+
+    } else if (event.effectType === 'lose_food') {
+      const loss = Math.min(updatedPlayer.resources.food, event.effectValue);
+      updatedPlayer.resources.food -= loss;
+      resultMsg = `${event.title}: 食料を${loss}つ失った！`;
+
+    } else if (event.effectType === 'lose_structure') {
+      const mySettlements = newSettlements.filter(s => s.playerId === player.id && s.level === 'settlement');
+      if (mySettlements.length > 0) {
+        const target = mySettlements[Math.floor(Math.random() * mySettlements.length)];
+        const idx = newSettlements.findIndex(s => s.vertexId === target.vertexId && s.playerId === player.id);
+        if (idx !== -1) newSettlements.splice(idx, 1);
+        updatedPlayer.victoryPoints = Math.max(0, updatedPlayer.victoryPoints - 1);
+        resultMsg = `${event.title}: 拠点が1つ失われた！`;
+      } else {
+        resultMsg = `${event.title}: 失う拠点がなかった！`;
+      }
+
+    } else if (event.effectType === 'skip_turn') {
+      skipAction = true;
+      resultMsg = `${event.title}: このターンは行動できない！`;
+
+    } else if (event.effectType === 'gain_resources') {
+      // Enter resource pick mode — let player choose
+      set({
+        currentEvent: null,
+        phase: 'action',
+        resourcePickMode: { remaining: event.effectValue, eventTitle: event.title },
+        gameLog: [...state.gameLog, generateGameLog(`${event.title}: 好きな資源を${event.effectValue}つ選ぼう！`, 'event', player.id)],
+      });
+      return; // Don't fall through to the set() below
+
+    } else if (event.effectType === 'gain_all') {
+      resources.forEach(res => { updatedPlayer.resources[res] += event.effectValue; });
+      resultMsg = `${event.title}: 全資源を${event.effectValue}つずつ獲得！`;
+
+    } else if (event.effectType === 'discount_build') {
+      // Enter resource pick mode — let player choose 2 resources
+      set({
+        currentEvent: null,
+        phase: 'action',
+        resourcePickMode: { remaining: 2, eventTitle: event.title },
+        gameLog: [...state.gameLog, generateGameLog(`${event.title}: 好きな資源を2つ選ぼう！`, 'event', player.id)],
+      });
+      return;
+
+    } else if (event.effectType === 'free_road') {
+      // Build a free road if possible
+      const validEdges = getValidRoadEdges(player.id, state.edges, state.vertices, newSettlements, state.roads, false);
+      if (validEdges.length > 0) {
+        const edgeId = validEdges[Math.floor(Math.random() * validEdges.length)];
+        newRoads.push({ edgeId, playerId: player.id });
+        resultMsg = `${event.title}: 道を1つ無料で建設した！`;
+      } else {
+        resultMsg = `${event.title}: 建設できる場所がなかった！`;
+      }
+    } else {
+      resultMsg = `${event.title}: ${event.description}`;
     }
 
     set({
       players: newPlayers,
       settlements: newSettlements,
+      roads: newRoads,
       currentEvent: null,
       phase: 'action',
       gameLog: [...state.gameLog, generateGameLog(resultMsg, 'event', player.id)],
     });
+
+    // skip_turn: immediately end turn without allowing actions
+    if (skipAction) {
+      get().doEndTurn();
+    }
+  },
+
+  // =============================================
+  // RESOURCE PICK (for gain_resources / discount_build events)
+  // =============================================
+  pickResource: (resource: ResourceType) => {
+    const state = get();
+    if (!state.resourcePickMode) return;
+
+    const player = state.players[state.currentPlayerIndex];
+    const newPlayers = state.players.map(p => {
+      if (p.id !== player.id) return p;
+      return { ...p, resources: { ...p.resources, [resource]: p.resources[resource] + 1 } };
+    });
+
+    const remaining = state.resourcePickMode.remaining - 1;
+    const resName = RESOURCE_INFO[resource].icon + RESOURCE_INFO[resource].name;
+
+    if (remaining <= 0) {
+      // Done picking
+      set({
+        players: newPlayers,
+        resourcePickMode: null,
+        gameLog: [...state.gameLog, generateGameLog(`${player.name}が${resName}を獲得！`, 'resource', player.id)],
+      });
+    } else {
+      set({
+        players: newPlayers,
+        resourcePickMode: { ...state.resourcePickMode, remaining },
+        gameLog: [...state.gameLog, generateGameLog(`${player.name}が${resName}を獲得！（あと${remaining}つ）`, 'resource', player.id)],
+      });
+    }
   },
 
   // =============================================
@@ -781,6 +916,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
         set({
           phase: 'finished',
           winner,
+          screen: 'result',
           currentTurn: turn,
           gameLog: [...state.gameLog, generateGameLog(`${winner.name}の勝利！`, 'system')],
         });
@@ -820,66 +956,226 @@ export const useGameStore = create<GameStore>((set, get) => ({
         // AI rolls dice
         const dice = rollDice();
         const total = dice[0] + dice[1];
-
-        // Calculate resource gains
-        const gains = distributeResourcesWithVertices(
-          state.tiles, state.vertices, simSettlements, simPlayers, total
-        );
+        const resName = (r: ResourceType) => RESOURCE_INFO[r].icon + RESOURCE_INFO[r].name;
 
         const matchingTileIds = state.tiles
           .filter(t => t.diceNumber === total && t.type !== 'sea' && t.type !== 'desert')
           .map(t => t.id);
 
-        // Apply gains to sim
-        gains.forEach(g => {
-          const p = simPlayers.find(pp => pp.id === g.playerId);
-          if (p) p.resources[g.resource] += g.amount;
-        });
+        // Build gains summary for dice_roll display
+        const gainsSummaryParts: string[] = [];
 
-        aiActions.push({
-          type: 'dice_roll',
-          playerId: aiP.id,
-          playerName: aiP.countryName,
-          playerFlag: aiP.flagEmoji,
-          playerColor: aiP.color,
-          dice,
-          diceTotal: total,
-          highlightTileIds: matchingTileIds,
-        });
+        if (total === 7) {
+          // Lucky 7: rolling player gains +1 of all resources
+          const allRes: ResourceType[] = ['rubber', 'oil', 'gold', 'food'];
+          allRes.forEach(res => { aiP.resources[res] += 1; });
+          const parts = allRes.map(res => `${RESOURCE_INFO[res].icon}+1`);
+          gainsSummaryParts.push(`${aiP.flagEmoji} ${parts.join(' ')}`);
 
-        logs.push(generateGameLog(`${aiP.name}がサイコロを振った！ 🎲 ${dice[0]} + ${dice[1]} = ${total}`, 'info', aiP.id));
+          logs.push(generateGameLog(`${aiP.name}がサイコロを振った！ 🎲 ${dice[0]}+${dice[1]}=${total}`, 'info', aiP.id));
+          logs.push(generateGameLog(`🎲7！${aiP.name}が全資源+1！`, 'resource', aiP.id));
 
-        if (gains.length > 0) {
-          gains.forEach(g => {
-            const p = simPlayers.find(pp => pp.id === g.playerId);
-            const resName = g.resource === 'rubber' ? 'ゴム' : g.resource === 'oil' ? '石油' : g.resource === 'gold' ? '金' : '食料';
-            logs.push(generateGameLog(`${p?.name || ''}が${resName}を${g.amount}つゲット！`, 'resource', g.playerId));
-            aiActions.push({
-              type: 'resource_gain',
-              playerId: g.playerId,
-              playerName: p?.name || '',
-              playerFlag: p?.flagEmoji || '',
-              playerColor: p?.color || '',
-              resource: g.resource,
-              resourceAmount: g.amount,
-            });
-          });
-        } else {
           aiActions.push({
-            type: 'no_resource',
+            type: 'dice_roll',
             playerId: aiP.id,
             playerName: aiP.countryName,
             playerFlag: aiP.flagEmoji,
             playerColor: aiP.color,
+            dice,
             diceTotal: total,
+            highlightTileIds: [],
+            gainsSummary: gainsSummaryParts.join('  '),
           });
+
+          // Single lucky_seven action instead of 4 separate resource_gains
+          aiActions.push({
+            type: 'lucky_seven',
+            playerId: aiP.id,
+            playerName: aiP.countryName,
+            playerFlag: aiP.flagEmoji,
+            playerColor: aiP.color,
+          });
+
+          // Event on 7 for AI — apply directly to sim
+          const aiEvent = getRandomEvent(state.difficulty);
+          if (aiEvent) {
+            const allResTypes: ResourceType[] = ['rubber', 'oil', 'gold', 'food'];
+            let eventMsg = '';
+            if (aiEvent.effectType === 'lose_resources') {
+              const r = allResTypes[Math.floor(Math.random() * allResTypes.length)];
+              const loss = Math.min(aiP.resources[r], aiEvent.effectValue);
+              aiP.resources[r] -= loss;
+              eventMsg = `${aiEvent.icon} ${aiP.name}: ${aiEvent.title} (${RESOURCE_INFO[r].icon}-${loss})`;
+            } else if (aiEvent.effectType === 'lose_food') {
+              const loss = Math.min(aiP.resources.food, aiEvent.effectValue);
+              aiP.resources.food -= loss;
+              eventMsg = `${aiEvent.icon} ${aiP.name}: ${aiEvent.title} (🌾-${loss})`;
+            } else if (aiEvent.effectType === 'gain_resources') {
+              const r = allResTypes[Math.floor(Math.random() * allResTypes.length)];
+              aiP.resources[r] += aiEvent.effectValue;
+              eventMsg = `${aiEvent.icon} ${aiP.name}: ${aiEvent.title} (${RESOURCE_INFO[r].icon}+${aiEvent.effectValue})`;
+            } else if (aiEvent.effectType === 'gain_all') {
+              allResTypes.forEach(r => { aiP.resources[r] += aiEvent.effectValue; });
+              eventMsg = `${aiEvent.icon} ${aiP.name}: ${aiEvent.title} (全資源+${aiEvent.effectValue})`;
+            } else if (aiEvent.effectType === 'discount_build') {
+              const r1 = allResTypes[Math.floor(Math.random() * allResTypes.length)];
+              const r2 = allResTypes[Math.floor(Math.random() * allResTypes.length)];
+              aiP.resources[r1] += 1; aiP.resources[r2] += 1;
+              eventMsg = `${aiEvent.icon} ${aiP.name}: ${aiEvent.title} (${RESOURCE_INFO[r1].icon}+1 ${RESOURCE_INFO[r2].icon}+1)`;
+            } else if (aiEvent.effectType === 'free_road') {
+              const validEdges = getValidRoadEdges(aiP.id, state.edges, state.vertices, simSettlements, simRoads, false);
+              if (validEdges.length > 0) {
+                simRoads.push({ edgeId: validEdges[Math.floor(Math.random() * validEdges.length)], playerId: aiP.id });
+              }
+              eventMsg = `${aiEvent.icon} ${aiP.name}: ${aiEvent.title}`;
+            } else if (aiEvent.effectType === 'lose_structure') {
+              const mySett = simSettlements.filter(s => s.playerId === aiP.id && s.level === 'settlement');
+              if (mySett.length > 0) {
+                const target = mySett[Math.floor(Math.random() * mySett.length)];
+                const idx2 = simSettlements.findIndex(s => s.vertexId === target.vertexId && s.playerId === aiP.id);
+                if (idx2 !== -1) simSettlements.splice(idx2, 1);
+                aiP.victoryPoints = Math.max(0, aiP.victoryPoints - 1);
+              }
+              eventMsg = `${aiEvent.icon} ${aiP.name}: ${aiEvent.title}`;
+            } else if (aiEvent.effectType === 'skip_turn') {
+              eventMsg = `${aiEvent.icon} ${aiP.name}: ${aiEvent.title}`;
+              // skip_turn for AI: just skip build actions (handled by not running aiTurn below...
+              // but we're already past this point, so just log it)
+            } else {
+              eventMsg = `${aiEvent.icon} ${aiP.name}: ${aiEvent.title}`;
+            }
+            logs.push(generateGameLog(eventMsg, 'event', aiP.id));
+            aiActions.push({
+              type: 'event',
+              playerId: aiP.id,
+              playerName: aiP.countryName,
+              playerFlag: aiP.flagEmoji,
+              playerColor: aiP.color,
+              eventTitle: aiEvent.title,
+              eventIcon: aiEvent.icon,
+              eventCategory: aiEvent.category,
+              eventDetail: eventMsg,
+            });
+          }
+        } else {
+          // Normal dice: distribute from tiles
+          const gains = distributeResourcesWithVertices(
+            state.tiles, state.vertices, simSettlements, simPlayers, total
+          );
+
+          // Apply gains to sim
+          gains.forEach(g => {
+            const p = simPlayers.find(pp => pp.id === g.playerId);
+            if (p) p.resources[g.resource] += g.amount;
+          });
+
+          const gainsByPlayer = new Map<string, string[]>();
+          gains.forEach(g => {
+            const icon = RESOURCE_INFO[g.resource].icon;
+            const parts = gainsByPlayer.get(g.playerId) || [];
+            parts.push(`${icon}+${g.amount}`);
+            gainsByPlayer.set(g.playerId, parts);
+          });
+          gainsByPlayer.forEach((parts, pid) => {
+            const p = simPlayers.find(pp => pp.id === pid);
+            gainsSummaryParts.push(`${p?.flagEmoji || ''} ${parts.join(' ')}`);
+          });
+
+          aiActions.push({
+            type: 'dice_roll',
+            playerId: aiP.id,
+            playerName: aiP.countryName,
+            playerFlag: aiP.flagEmoji,
+            playerColor: aiP.color,
+            dice,
+            diceTotal: total,
+            highlightTileIds: matchingTileIds,
+            gainsSummary: gainsSummaryParts.length > 0 ? gainsSummaryParts.join('  ') : undefined,
+          });
+
+          logs.push(generateGameLog(`${aiP.name}がサイコロを振った！ 🎲 ${dice[0]}+${dice[1]}=${total}`, 'info', aiP.id));
+
+          if (gains.length > 0) {
+            gains.forEach(g => {
+              const p = simPlayers.find(pp => pp.id === g.playerId);
+              logs.push(generateGameLog(`${p?.name || ''}が${resName(g.resource)}+${g.amount}`, 'resource', g.playerId));
+            });
+            // Single dice_gains action with all gains bundled
+            aiActions.push({
+              type: 'dice_gains',
+              playerId: aiP.id,
+              playerName: aiP.countryName,
+              playerFlag: aiP.flagEmoji,
+              playerColor: aiP.color,
+              diceGains: gains.map(g => ({ playerId: g.playerId, resource: g.resource, amount: g.amount })),
+            });
+          } else {
+            aiActions.push({
+              type: 'no_resource',
+              playerId: aiP.id,
+              playerName: aiP.countryName,
+              playerFlag: aiP.flagEmoji,
+              playerColor: aiP.color,
+              diceTotal: total,
+            });
+          }
         }
 
         // AI build actions
         const aiActs = aiTurn(aiP, state.tiles, state.vertices, state.edges, simSettlements, simRoads, state.difficulty);
         aiActs.forEach(a => {
-          const actionMsg = a.type === 'build_road' ? `${aiP.flagEmoji} ${aiP.name}が道を建設！` : a.type === 'build_settlement' ? `${aiP.flagEmoji} ${aiP.name}が拠点を建設！` : a.type === 'upgrade_city' ? `${aiP.flagEmoji} ${aiP.name}が都市にアップグレード！` : a.type === 'trade' ? `${aiP.name}が交換した` : `${aiP.name}はパスした`;
-          logs.push(generateGameLog(actionMsg, a.type === 'build_road' ? 'road' : 'build', aiP.id));
+          if (a.type === 'pass') {
+            logs.push(generateGameLog(`${aiP.name}はパスした`, 'info', aiP.id));
+            return;
+          }
+          if (a.type === 'trade') {
+            if (a.tradeFrom && a.tradeTo) {
+              aiP.resources[a.tradeFrom] -= 3;
+              aiP.resources[a.tradeTo] += 1;
+              const fromInfo = RESOURCE_INFO[a.tradeFrom];
+              const toInfo = RESOURCE_INFO[a.tradeTo];
+              logs.push(generateGameLog(`${aiP.flagEmoji} ${aiP.name}が${fromInfo.icon}${fromInfo.name}×3→${toInfo.icon}${toInfo.name}×1に交換`, 'trade', aiP.id));
+              aiActions.push({
+                type: 'build_road', // reuse for display (trade has no dedicated type in overlay)
+                playerId: aiP.id,
+                playerName: aiP.countryName,
+                playerFlag: aiP.flagEmoji,
+                playerColor: aiP.color,
+                buildType: '交換',
+                costText: `${fromInfo.icon}-3 → ${toInfo.icon}+1`,
+                tradeFrom: a.tradeFrom,
+                tradeTo: a.tradeTo,
+              });
+            }
+            return;
+          }
+
+          // Build cost text
+          const cost = a.type === 'build_settlement' ? BUILD_COSTS.settlement
+            : a.type === 'build_road' ? BUILD_COSTS.road
+            : BUILD_COSTS.city;
+          const costParts = (Object.entries(cost) as [ResourceType, number][])
+            .map(([res, amt]) => `${RESOURCE_INFO[res].icon}-${amt}`);
+          const costText = costParts.join(' ');
+
+          // Apply cost to sim player
+          (Object.entries(cost) as [ResourceType, number][]).forEach(([res, amt]) => {
+            aiP.resources[res] -= amt;
+          });
+
+          // Update sim board state
+          if (a.type === 'build_settlement' && a.vertexId) {
+            simSettlements.push({ vertexId: a.vertexId, playerId: aiP.id, level: 'settlement' });
+            aiP.victoryPoints += 1;
+          } else if (a.type === 'build_road' && a.edgeId) {
+            simRoads.push({ edgeId: a.edgeId, playerId: aiP.id });
+          } else if (a.type === 'upgrade_city' && a.vertexId) {
+            const s = simSettlements.find(s => s.vertexId === a.vertexId && s.playerId === aiP.id);
+            if (s) { s.level = 'city'; aiP.victoryPoints += 1; }
+          }
+
+          const buildLabel = a.type === 'build_road' ? '道' : a.type === 'build_settlement' ? '拠点' : '都市';
+          logs.push(generateGameLog(`${aiP.flagEmoji} ${aiP.name}が${costParts.join('')}で${buildLabel}を建設`, a.type === 'build_road' ? 'road' : 'build', aiP.id));
           aiActions.push({
             type: a.type === 'build_road' ? 'build_road' : a.type === 'build_settlement' ? 'build_settlement' : 'upgrade_city',
             playerId: aiP.id,
@@ -888,7 +1184,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
             playerColor: aiP.color,
             edgeId: a.edgeId,
             vertexId: a.vertexId,
-            buildType: a.type === 'build_road' ? '道' : a.type === 'build_settlement' ? '拠点' : '都市',
+            buildType: buildLabel,
+            costText,
           });
         });
 
@@ -1049,6 +1346,33 @@ export const useGameStore = create<GameStore>((set, get) => ({
         }],
         highlightedTileIds: action.highlightTileIds || [],
       });
+    } else if (action.type === 'dice_gains' && action.diceGains) {
+      // Apply all resource gains at once
+      const newPlayers = state.players.map(p => {
+        const pGains = action.diceGains!.filter(g => g.playerId === p.id);
+        if (pGains.length === 0) return p;
+        const res = { ...p.resources };
+        pGains.forEach(g => { res[g.resource] += g.amount; });
+        return { ...p, resources: res };
+      });
+      set({
+        currentAIAction: action,
+        aiActionQueue: queue,
+        players: newPlayers,
+      });
+    } else if (action.type === 'lucky_seven') {
+      // Apply all +1 resources at once
+      const newPlayers = state.players.map(p => {
+        if (p.id !== action.playerId) return p;
+        const res = { ...p.resources };
+        res.rubber += 1; res.oil += 1; res.gold += 1; res.food += 1;
+        return { ...p, resources: res };
+      });
+      set({
+        currentAIAction: action,
+        aiActionQueue: queue,
+        players: newPlayers,
+      });
     } else if (action.type === 'dice_roll') {
       set({
         currentAIAction: action,
@@ -1057,7 +1381,13 @@ export const useGameStore = create<GameStore>((set, get) => ({
         highlightedTileIds: action.highlightTileIds || [],
       });
     } else if (action.type === 'build_settlement' && action.vertexId) {
-      // Show the settlement being built
+      const cost = BUILD_COSTS.settlement;
+      const newPlayers = state.players.map(p => {
+        if (p.id !== action.playerId) return p;
+        const res = { ...p.resources };
+        (Object.entries(cost) as [ResourceType, number][]).forEach(([r, amt]) => { res[r] -= amt; });
+        return { ...p, resources: res, victoryPoints: p.victoryPoints + 1 };
+      });
       const newSettlements = [...state.settlements, {
         vertexId: action.vertexId,
         playerId: action.playerId,
@@ -1066,9 +1396,17 @@ export const useGameStore = create<GameStore>((set, get) => ({
       set({
         currentAIAction: action,
         aiActionQueue: queue,
+        players: newPlayers,
         settlements: newSettlements,
       });
-    } else if (action.type === 'build_road' && action.edgeId) {
+    } else if (action.type === 'build_road' && action.edgeId && !action.tradeFrom) {
+      const cost = BUILD_COSTS.road;
+      const newPlayers = state.players.map(p => {
+        if (p.id !== action.playerId) return p;
+        const res = { ...p.resources };
+        (Object.entries(cost) as [ResourceType, number][]).forEach(([r, amt]) => { res[r] -= amt; });
+        return { ...p, resources: res };
+      });
       const newRoads = [...state.roads, {
         edgeId: action.edgeId,
         playerId: action.playerId,
@@ -1076,9 +1414,31 @@ export const useGameStore = create<GameStore>((set, get) => ({
       set({
         currentAIAction: action,
         aiActionQueue: queue,
+        players: newPlayers,
         roads: newRoads,
       });
+    } else if (action.type === 'build_road' && action.tradeFrom && action.tradeTo) {
+      // Trade action (reuses build_road type)
+      const newPlayers = state.players.map(p => {
+        if (p.id !== action.playerId) return p;
+        const res = { ...p.resources };
+        res[action.tradeFrom!] -= 3;
+        res[action.tradeTo!] += 1;
+        return { ...p, resources: res };
+      });
+      set({
+        currentAIAction: action,
+        aiActionQueue: queue,
+        players: newPlayers,
+      });
     } else if (action.type === 'upgrade_city' && action.vertexId) {
+      const cost = BUILD_COSTS.city;
+      const newPlayers = state.players.map(p => {
+        if (p.id !== action.playerId) return p;
+        const res = { ...p.resources };
+        (Object.entries(cost) as [ResourceType, number][]).forEach(([r, amt]) => { res[r] -= amt; });
+        return { ...p, resources: res, victoryPoints: p.victoryPoints + 1 };
+      });
       const newSettlements = state.settlements.map(s =>
         s.vertexId === action.vertexId && s.playerId === action.playerId
           ? { ...s, level: 'city' as const }
@@ -1087,6 +1447,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
       set({
         currentAIAction: action,
         aiActionQueue: queue,
+        players: newPlayers,
         settlements: newSettlements,
       });
     } else {

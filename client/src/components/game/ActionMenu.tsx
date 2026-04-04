@@ -17,7 +17,7 @@ export default function ActionMenu() {
     phase, players, currentPlayerIndex, doEndTurn,
     buildMode, startBuild, cancelBuild, confirmBuild,
     selectedVertexId, selectedEdgeId,
-    vertices, edges, settlements, roads,
+    vertices, edges, settlements, roads, difficulty,
   } = useGameStore();
   const [showBuild, setShowBuild] = useState(false);
   const [showTrade, setShowTrade] = useState(false);
@@ -30,7 +30,7 @@ export default function ActionMenu() {
   const canBuildRoadAfford = canAfford(player, BUILD_COSTS.road);
 
   // Check if there are valid positions
-  const hasValidSettlements = getValidSettlementVertices(player.id, vertices, settlements, roads, false).length > 0;
+  const hasValidSettlements = getValidSettlementVertices(player.id, vertices, settlements, roads, false, difficulty).length > 0;
   const hasValidRoads = getValidRoadEdges(player.id, edges, vertices, settlements, roads, false).length > 0;
   const hasUpgradeableSettlements = getUpgradeableVertices(player.id, settlements).length > 0;
 
@@ -105,12 +105,29 @@ export default function ActionMenu() {
             <h3 className="font-heading font-bold text-amber-900 text-center mb-2">
               なにを建てる？
             </h3>
+            <div className="flex justify-center gap-2 mb-2 text-xs font-bold text-amber-800">
+              {(['rubber', 'oil', 'gold', 'food'] as ResourceType[]).map(res => (
+                <span key={res} className={player.resources[res] > 0 ? '' : 'opacity-40'}>
+                  {RESOURCE_INFO[res].icon}{player.resources[res]}
+                </span>
+              ))}
+            </div>
+            {!canBuildRoadAfford && !canBuildSettlementAfford && !canBuildCityAfford ? (
+              <div className="text-center text-red-500 text-xs font-bold mb-2 bg-red-50 rounded-lg py-1.5 border border-red-200">
+                ⚠️ 資源が足りません。交換やサイコロで集めよう！
+              </div>
+            ) : canBuildRoadAfford && hasValidRoads && !hasValidSettlements && (
+              <div className="text-center text-blue-600 text-xs font-bold mb-2 bg-blue-50 rounded-lg py-1.5 border border-blue-200">
+                💡 まず道を伸ばして、拠点を建てる場所を作ろう！
+              </div>
+            )}
             <div className="flex flex-col gap-2">
               <BuildOption
                 label="🛤️ 道"
                 cost="ゴム1・石油1"
                 points="道"
                 enabled={canBuildRoadAfford && hasValidRoads}
+                disabledReason={!canBuildRoadAfford ? '資源が足りない' : !hasValidRoads ? '建設できる場所がない' : undefined}
                 description="道をつなげて新しい場所に拠点を建てよう！"
                 onClick={() => handleSelectBuildType('road')}
               />
@@ -119,6 +136,7 @@ export default function ActionMenu() {
                 cost="ゴム1・食料1・金1・石油1"
                 points="+1点"
                 enabled={canBuildSettlementAfford && hasValidSettlements}
+                disabledReason={!canBuildSettlementAfford ? '資源が足りない' : !hasValidSettlements ? '場所がない（道を伸ばそう！）' : undefined}
                 description="頂点に拠点を建てると、隣のタイルから資源がもらえる！"
                 onClick={() => handleSelectBuildType('settlement')}
               />
@@ -127,6 +145,7 @@ export default function ActionMenu() {
                 cost="石油2・金2・食料1"
                 points="+1点"
                 enabled={canBuildCityAfford && hasUpgradeableSettlements}
+                disabledReason={!canBuildCityAfford ? '資源が足りない' : !hasUpgradeableSettlements ? 'アップグレードできる拠点がない' : undefined}
                 description="拠点を都市にすると、資源が2倍もらえるよ！"
                 onClick={() => handleSelectBuildType('city')}
               />
@@ -215,11 +234,12 @@ function ActionButton({ icon, label, color, onClick, active }: {
   );
 }
 
-function BuildOption({ label, cost, points, enabled, description, onClick }: {
+function BuildOption({ label, cost, points, enabled, disabledReason, description, onClick }: {
   label: string;
   cost: string;
   points: string;
   enabled: boolean;
+  disabledReason?: string;
   description: string;
   onClick: () => void;
 }) {
@@ -236,7 +256,13 @@ function BuildOption({ label, cost, points, enabled, description, onClick }: {
       <div className="flex-1">
         <div className="font-heading font-bold text-amber-900">{label}</div>
         <div className="text-xs text-amber-700">{cost}</div>
-        <div className="text-xs text-amber-600 mt-0.5">{description}</div>
+        {enabled ? (
+          <div className="text-xs text-amber-600 mt-0.5">{description}</div>
+        ) : disabledReason ? (
+          <div className="text-xs text-red-500 mt-0.5">⚠️ {disabledReason}</div>
+        ) : (
+          <div className="text-xs text-amber-600 mt-0.5">{description}</div>
+        )}
       </div>
       <div className="font-score font-bold text-amber-600 text-sm ml-2 shrink-0">{points}</div>
     </button>

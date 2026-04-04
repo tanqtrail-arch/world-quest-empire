@@ -11,7 +11,7 @@ import { PLAYER_COLORS, type Difficulty, type PlayerSlot } from '@/lib/gameTypes
 import { motion, AnimatePresence } from 'framer-motion';
 import { ArrowLeft, Bot, User, Plus, Minus } from 'lucide-react';
 
-const WOOD_BG = 'https://d2xsxph8kpxj0f.cloudfront.net/310519663286960690/RthryRhRZNJvzXLKUFJiBd/wood-texture-3bU4G8nuC3Js3NFmH6shph.webp';
+const WOOD_BG = '/wood-texture.webp';
 
 const DEFAULT_SLOTS: PlayerSlot[] = [
   { type: 'human', name: '', countryIndex: 0 },
@@ -90,7 +90,7 @@ export default function CreateRoom() {
         initial={{ scale: 0.9, opacity: 0 }}
         animate={{ scale: 1, opacity: 1 }}
         transition={{ duration: 0.4 }}
-        className="parchment rounded-2xl p-5 w-full max-w-md"
+        className="parchment rounded-2xl p-5 w-full max-w-md md:max-w-lg"
       >
         {/* Back button */}
         <button

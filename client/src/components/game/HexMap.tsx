@@ -10,40 +10,29 @@ import { useGameStore } from '@/lib/gameStore';
 import { TILE_INFO, RESOURCE_INFO, type ResourceType, type TileType, type GameTile, type EventCard } from '@/lib/gameTypes';
 import { getValidSettlementVertices, getValidRoadEdges } from '@/lib/gameLogic';
 import {
-  HEX_SIZE, SVG_WIDTH, SVG_HEIGHT,
-  getTileCenter, getHexPoints,
+  HEX_SIZE,
+  getTileCenter, getHexPoints, getSvgDimensions,
 } from '@/lib/hexGeometry';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useRef } from 'react';
 
 // --- Dice Result Zoom ---
-function DiceResultZoom({ diceTotal, tiles, playerColors, playerFlags, onClose, pendingEvent, settlements, vertices }: {
+function DiceResultZoom({ diceTotal, players, resourceGains, playerColors, playerFlags, onClose, pendingEvent }: {
   diceTotal: number;
-  tiles: GameTile[];
+  players: { id: string; name: string; flagEmoji: string }[];
+  resourceGains: { playerId: string; resource: ResourceType; amount: number }[];
   playerColors: Record<string, string>;
   playerFlags: Record<string, string>;
   onClose: () => void;
   pendingEvent?: EventCard | null;
-  settlements: any[];
-  vertices: any[];
 }) {
-  const matchingTiles = tiles.filter(t => t.diceNumber === diceTotal && t.type !== 'sea' && t.type !== 'desert');
-
-  // Find which players gain from each tile
-  const tileGains = matchingTiles.map(tile => {
-    const adjVertices = vertices.filter((v: any) => v.adjacentTileIds.includes(tile.id));
-    const gains = adjVertices
-      .map((v: any) => settlements.find((s: any) => s.vertexId === v.id))
-      .filter(Boolean)
-      .map((s: any) => ({
-        playerId: s.playerId,
-        level: s.level,
-        amount: s.level === 'city' ? 2 : 1,
-      }));
-    return { tile, gains };
+  // Group gains by player
+  const gainsByPlayer = new Map<string, { resource: ResourceType; amount: number }[]>();
+  resourceGains.forEach(g => {
+    const list = gainsByPlayer.get(g.playerId) || [];
+    list.push({ resource: g.resource, amount: g.amount });
+    gainsByPlayer.set(g.playerId, list);
   });
-
-  const hasAnyGains = tileGains.some(tg => tg.gains.length > 0);
 
   return (
     <motion.div
@@ -68,40 +57,46 @@ function DiceResultZoom({ diceTotal, tiles, playerColors, playerFlags, onClose, 
           </div>
         </div>
 
-        {matchingTiles.length === 0 ? (
+        {diceTotal === 7 ? (
+          <div className="text-center py-3">
+            <div className="text-4xl mb-2">🎉</div>
+            <div className="font-heading font-bold text-lg text-emerald-700">
+              ラッキー7！全資源+1！
+            </div>
+            <div className="text-sm text-emerald-600 mt-1">
+              🌿+1 🛢️+1 💰+1 🌾+1
+            </div>
+          </div>
+        ) : resourceGains.length === 0 ? (
           <div className="text-center text-gray-600 py-3 text-sm">
-            この出目({diceTotal})のタイルはありません
+            出目{diceTotal}では誰も資源をもらえなかった
           </div>
         ) : (
-          <div className="space-y-2 max-h-48 overflow-y-auto">
-            {tileGains.map(({ tile, gains }) => {
-              const resInfo = RESOURCE_INFO[tile.type as ResourceType];
+          <div className="space-y-1.5">
+            {players.map(p => {
+              const pGains = gainsByPlayer.get(p.id);
+              if (!pGains) return null;
               return (
-                <div key={tile.id} className="flex items-center gap-2 bg-white/80 rounded-lg p-2 border border-amber-200">
-                  <div className="text-2xl">{resInfo?.icon}</div>
-                  <div className="flex-1">
-                    <div className="font-bold text-sm">{resInfo?.name} ({tile.diceNumber})</div>
-                    {gains.length > 0 ? (
-                      <div className="flex gap-1 flex-wrap mt-0.5">
-                        {gains.map((g: any, i: number) => (
-                          <span key={i} className="text-xs px-1.5 py-0.5 rounded-full" style={{ backgroundColor: playerColors[g.playerId] + '30', color: playerColors[g.playerId] }}>
-                            {playerFlags[g.playerId]} +{g.amount}
-                          </span>
-                        ))}
-                      </div>
-                    ) : (
-                      <div className="text-xs text-gray-500">拠点がないので資源はもらえなかった</div>
-                    )}
+                <motion.div
+                  key={p.id}
+                  initial={{ x: -15, opacity: 0 }}
+                  animate={{ x: 0, opacity: 1 }}
+                  transition={{ delay: 0.1 }}
+                  className="flex items-center gap-2 bg-white/80 rounded-lg px-3 py-2 border border-amber-200"
+                  style={{ borderLeftColor: playerColors[p.id], borderLeftWidth: 4 }}
+                >
+                  <span className="text-lg">{p.flagEmoji}</span>
+                  <span className="font-heading font-bold text-sm text-amber-900 shrink-0">{p.name}</span>
+                  <div className="flex gap-1.5 flex-wrap ml-auto">
+                    {pGains.map((g, i) => (
+                      <span key={i} className="text-sm font-bold text-emerald-700">
+                        {RESOURCE_INFO[g.resource].icon}+{g.amount}
+                      </span>
+                    ))}
                   </div>
-                </div>
+                </motion.div>
               );
             })}
-          </div>
-        )}
-
-        {!hasAnyGains && matchingTiles.length > 0 && (
-          <div className="text-center text-gray-500 text-xs mt-2">
-            誰もこのタイルに拠点を持っていません
           </div>
         )}
 
@@ -243,11 +238,12 @@ export default function HexMap() {
     currentPlayerIndex, highlightedTileIds, highlightedVertexIds, highlightedEdgeIds,
     buildMode, selectedVertexId, selectedEdgeId, selectVertex, selectEdge,
     phase, diceResult, showResourceGains, dismissResourceGains, isPlayingAI,
-    pendingEvent, setupPhase,
+    pendingEvent, setupPhase, resourceGains, mapRows,
   } = useGameStore();
 
   const currentPlayer = players[currentPlayerIndex];
   const mapRef = useRef<HTMLDivElement>(null);
+  const { width: svgW, height: svgH } = getSvgDimensions(mapRows);
 
   // Build maps
   const playerColors: Record<string, string> = {};
@@ -302,13 +298,13 @@ export default function HexMap() {
     : highlightedEdgeIds;
 
   return (
-    <div className="flex flex-col items-center w-full">
+    <div className="flex flex-col items-center w-full min-h-0 md:flex-1">
       {/* Build/Setup mode indicator */}
       {(buildMode || (phase === 'setup' && setupPhase)) && (
         <motion.div
           initial={{ y: -20, opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}
-          className="bg-emerald-500/90 text-white font-heading font-bold text-sm px-5 py-2 rounded-full mb-1 shadow-lg z-20"
+          className="shrink-0 bg-emerald-500/90 text-white font-heading font-bold text-sm md:text-xs px-5 md:px-3 py-2 md:py-1 rounded-full mb-1 shadow-lg z-20"
         >
           <span className="animate-pulse inline-block mr-1">
             {buildMode === 'road' || setupPhase?.step === 'place_road' ? '🛤️' :
@@ -325,21 +321,21 @@ export default function HexMap() {
         </motion.div>
       )}
 
-      {/* Scrollable Map Container */}
+      {/* Map Container */}
+      {/* Mobile: scrollable with max-height cap */}
+      {/* PC: flex-1 fills remaining space, SVG scales to fit via preserveAspectRatio */}
       <div
         ref={mapRef}
-        className="w-full overflow-auto"
-        style={{ maxHeight: '55vh', WebkitOverflowScrolling: 'touch' }}
+        className="w-full max-h-[55vh] overflow-auto md:max-h-none md:overflow-visible md:flex-1 md:min-h-0"
       >
         <svg
-          viewBox={`0 0 ${SVG_WIDTH} ${SVG_HEIGHT}`}
-          width="100%"
-          style={{ minWidth: '360px', minHeight: '300px' }}
-          className="drop-shadow-lg"
+          viewBox={`0 0 ${svgW} ${svgH}`}
+          preserveAspectRatio="xMidYMid meet"
+          className="drop-shadow-lg w-full h-auto min-w-[360px] min-h-[300px] md:min-w-0 md:min-h-0 md:h-full md:w-full"
         >
           {/* Layer 1: Hex Tiles - using shared getTileCenter */}
           {tiles.map((tile, tileIdx) => {
-            const center = getTileCenter(tileIdx);
+            const center = getTileCenter(tileIdx, mapRows);
             const isHighlighted = highlightedTileIds.includes(tile.id);
             return (
               <HexTile
@@ -494,12 +490,11 @@ export default function HexMap() {
         {shouldShowDiceZoom && (
           <DiceResultZoom
             diceTotal={diceTotal}
-            tiles={tiles}
+            players={players}
+            resourceGains={resourceGains}
             playerColors={playerColors}
             playerFlags={playerFlags}
             pendingEvent={pendingEvent}
-            settlements={settlements}
-            vertices={vertices}
             onClose={() => dismissResourceGains()}
           />
         )}

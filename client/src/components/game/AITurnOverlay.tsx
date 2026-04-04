@@ -12,10 +12,13 @@ const ACTION_DURATIONS: Record<AIAction['type'], number> = {
   turn_start: 1500,
   dice_roll: 2200,
   resource_gain: 1500,
+  dice_gains: 1800,
+  lucky_seven: 2000,
   no_resource: 1200,
   build_settlement: 1800,
   upgrade_city: 1800,
   build_road: 1500,
+  event: 2200,
   turn_end: 800,
 };
 
@@ -94,6 +97,26 @@ function ActionContent({ action }: { action: AIAction }) {
               </>
             )}
           </div>
+          {action.gainsSummary && (
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.7 }}
+              className="text-base font-bold text-emerald-700 bg-emerald-50 rounded-lg px-3 py-1.5 border border-emerald-200"
+            >
+              → {action.gainsSummary}
+            </motion.div>
+          )}
+          {!action.gainsSummary && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ delay: 0.7 }}
+              className="text-sm text-gray-500"
+            >
+              資源獲得なし
+            </motion.div>
+          )}
         </div>
       );
 
@@ -128,6 +151,68 @@ function ActionContent({ action }: { action: AIAction }) {
       );
     }
 
+    case 'dice_gains': {
+      // Group gains by player
+      const gainsByPlayer = new Map<string, string[]>();
+      (action.diceGains || []).forEach(g => {
+        const list = gainsByPlayer.get(g.playerId) || [];
+        list.push(`${RESOURCE_INFO[g.resource].icon}+${g.amount}`);
+        gainsByPlayer.set(g.playerId, list);
+      });
+      const { players } = useGameStore.getState();
+      return (
+        <div className="text-center py-2">
+          <div className="text-sm text-amber-700 font-bold mb-2">資源獲得！</div>
+          <div className="space-y-1.5">
+            {Array.from(gainsByPlayer.entries()).map(([pid, parts]) => {
+              const p = players.find(pp => pp.id === pid);
+              return (
+                <motion.div
+                  key={pid}
+                  initial={{ x: -15, opacity: 0 }}
+                  animate={{ x: 0, opacity: 1 }}
+                  className="flex items-center gap-2 bg-white/80 rounded-lg px-3 py-1.5 text-sm"
+                  style={{ borderLeft: `4px solid ${p?.color || '#888'}` }}
+                >
+                  <span className="text-base">{p?.flagEmoji}</span>
+                  <span className="font-bold text-amber-900">{p?.name}</span>
+                  <span className="ml-auto font-bold text-emerald-700">{parts.join(' ')}</span>
+                </motion.div>
+              );
+            })}
+          </div>
+        </div>
+      );
+    }
+
+    case 'lucky_seven':
+      return (
+        <div className="text-center py-2">
+          <div className="text-sm text-amber-700 font-bold mb-2">
+            {action.playerFlag} {action.playerName}
+          </div>
+          <motion.div
+            initial={{ scale: 0, rotate: -20 }}
+            animate={{ scale: [0, 1.3, 1], rotate: 0 }}
+            transition={{ type: 'spring', stiffness: 200 }}
+            className="text-5xl mb-3"
+          >
+            🎉
+          </motion.div>
+          <div className="text-xl font-heading font-bold text-amber-900 mb-2">
+            ラッキー7！全資源+1！
+          </div>
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.4 }}
+            className="text-lg font-bold text-emerald-700 bg-emerald-50 rounded-lg px-4 py-2 border border-emerald-200 inline-block"
+          >
+            🌿+1 🛢️+1 💰+1 🌾+1
+          </motion.div>
+        </div>
+      );
+
     case 'no_resource':
       return (
         <div className="text-center py-2">
@@ -153,15 +238,25 @@ function ActionContent({ action }: { action: AIAction }) {
             transition={{ type: 'spring', stiffness: 200 }}
             className="text-5xl mb-3"
           >
-            🛤️
+            {action.buildType === '交換' ? '🔄' : '🛤️'}
           </motion.div>
+          {action.costText && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ delay: 0.2 }}
+              className="text-sm font-bold text-red-600 bg-red-50 rounded-lg px-3 py-1 mb-2 inline-block border border-red-200"
+            >
+              {action.costText}
+            </motion.div>
+          )}
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ delay: 0.3 }}
             className="text-xl font-heading font-bold text-amber-900"
           >
-            道を建設した！
+            {action.buildType === '交換' ? '資源を交換した！' : '道を建設した！'}
           </motion.div>
         </div>
       );
@@ -180,6 +275,16 @@ function ActionContent({ action }: { action: AIAction }) {
           >
             🏠
           </motion.div>
+          {action.costText && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ delay: 0.2 }}
+              className="text-sm font-bold text-red-600 bg-red-50 rounded-lg px-3 py-1 mb-2 inline-block border border-red-200"
+            >
+              {action.costText}
+            </motion.div>
+          )}
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -205,6 +310,16 @@ function ActionContent({ action }: { action: AIAction }) {
           >
             🏰
           </motion.div>
+          {action.costText && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ delay: 0.3 }}
+              className="text-sm font-bold text-red-600 bg-red-50 rounded-lg px-3 py-1 mb-2 inline-block border border-red-200"
+            >
+              {action.costText}
+            </motion.div>
+          )}
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -213,6 +328,43 @@ function ActionContent({ action }: { action: AIAction }) {
           >
             都市にアップグレード！
           </motion.div>
+        </div>
+      );
+
+    case 'event':
+      return (
+        <div className="text-center py-2">
+          <div className="text-sm text-amber-700 font-bold mb-2">
+            {action.playerFlag} {action.playerName}
+          </div>
+          <motion.div
+            initial={{ scale: 0, rotate: -10 }}
+            animate={{ scale: 1, rotate: 0 }}
+            transition={{ type: 'spring', stiffness: 200 }}
+            className="text-5xl mb-3"
+          >
+            {action.eventIcon || '⚡'}
+          </motion.div>
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 0.3 }}
+            className={`text-lg font-heading font-bold mb-1 ${
+              action.eventCategory === 'positive' ? 'text-emerald-700' : 'text-red-700'
+            }`}
+          >
+            {action.eventTitle}
+          </motion.div>
+          {action.eventDetail && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ delay: 0.5 }}
+              className="text-sm text-amber-700"
+            >
+              {action.eventDetail}
+            </motion.div>
+          )}
         </div>
       );
 

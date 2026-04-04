@@ -4,11 +4,13 @@ import {
   type EventCard, type GameLogEntry, type Difficulty,
   type Vertex, type Edge, type Settlement, type Road,
   HEX_LAYOUT, TILE_DISTRIBUTION, DICE_NUMBERS, EVENT_CARDS,
+  HEX_LAYOUT_LARGE, TILE_DISTRIBUTION_LARGE, DICE_NUMBERS_LARGE, ROWS_LARGE,
   BUILD_COSTS, VP_VALUES, WINNING_SCORE, PLAYER_COLORS,
 } from './gameTypes';
 import {
   HEX_SIZE, ROWS, COL_SPACING, ROW_SPACING,
   getTileCenter, getHexCorners, roundCoord, coordKey,
+  ROWS_LARGE as GEO_ROWS_LARGE,
 } from './hexGeometry';
 
 // --- Shuffle Array ---
@@ -32,14 +34,15 @@ export function genId(): string {
 // =============================================
 
 // Generate all vertices and edges from the hex grid
-export function generateVerticesAndEdges(tiles: GameTile[]): { vertices: Vertex[]; edges: Edge[] } {
+export function generateVerticesAndEdges(tiles: GameTile[], rows?: number[]): { vertices: Vertex[]; edges: Edge[] } {
+  const mapRows = rows || ROWS;
   // Map from coordinate key to vertex data
   const vertexMap = new Map<string, { x: number; y: number; tileIds: Set<number> }>();
   // Map from tile index to its corner coordinate keys
   const tileCornerKeys: string[][] = [];
 
   tiles.forEach((tile, tileIdx) => {
-    const center = getTileCenter(tileIdx);
+    const center = getTileCenter(tileIdx, mapRows);
     const corners = getHexCorners(center.x, center.y);
     const keys: string[] = [];
 
@@ -138,28 +141,30 @@ export function generateVerticesAndEdges(tiles: GameTile[]): { vertices: Vertex[
 // MAP GENERATION
 // =============================================
 
-export function generateMap(): GameTile[] {
-  const shuffledTypes = shuffle(TILE_DISTRIBUTION);
-  const nonSpecialIndices: number[] = [];
-  shuffledTypes.forEach((t, i) => { if (t !== 'sea' && t !== 'desert') nonSpecialIndices.push(i); });
-  
-  const shuffledNumbers = shuffle(DICE_NUMBERS);
-  let numIdx = 0;
+export function generateMap(playerCount: number = 3): GameTile[] {
+  const isLarge = playerCount >= 5;
+  const layout = isLarge ? HEX_LAYOUT_LARGE : HEX_LAYOUT;
+  const distribution = isLarge ? TILE_DISTRIBUTION_LARGE : TILE_DISTRIBUTION;
+  const diceNumbers = isLarge ? DICE_NUMBERS_LARGE : DICE_NUMBERS;
+  const centerIndex = isLarge ? 12 : 9; // center of 4-5-6-5-4 or 3-4-5-4-3
 
-  return HEX_LAYOUT.map((pos, i) => {
-    const type = shuffledTypes[i] || 'sea';
-    let diceNumber = 0;
-    if (type !== 'sea' && type !== 'desert' && numIdx < shuffledNumbers.length) {
-      diceNumber = shuffledNumbers[numIdx++];
+  const resourceTypes = shuffle(distribution.filter(t => t !== 'desert'));
+  const shuffledNumbers = shuffle(diceNumbers);
+  let numIdx = 0;
+  let resIdx = 0;
+
+  return layout.map((pos, i) => {
+    if (i === centerIndex) {
+      return { id: i, type: 'desert' as TileType, diceNumber: 0, q: pos.q, r: pos.r };
     }
-    return {
-      id: i,
-      type,
-      diceNumber,
-      q: pos.q,
-      r: pos.r,
-    };
+    const type = resourceTypes[resIdx++] || 'rubber';
+    const diceNumber = numIdx < shuffledNumbers.length ? shuffledNumbers[numIdx++] : 0;
+    return { id: i, type, diceNumber, q: pos.q, r: pos.r };
   });
+}
+
+export function getMapRows(playerCount: number): number[] {
+  return playerCount >= 5 ? ROWS_LARGE : ROWS;
 }
 
 // =============================================
@@ -261,13 +266,39 @@ export function payCost(player: Player, cost: Partial<Resources>): void {
 }
 
 // Check if a vertex is valid for building a settlement
+// BFS shortest path distance between two vertices (edge count)
+function bfsDistance(fromId: string, toId: string, vertices: Vertex[]): number {
+  if (fromId === toId) return 0;
+  const visited = new Set<string>([fromId]);
+  let queue = [fromId];
+  let dist = 0;
+  while (queue.length > 0 && dist < 5) {
+    dist++;
+    const next: string[] = [];
+    for (const vid of queue) {
+      const v = vertices.find(vv => vv.id === vid);
+      if (!v) continue;
+      for (const adjId of v.adjacentVertexIds) {
+        if (adjId === toId) return dist;
+        if (!visited.has(adjId)) {
+          visited.add(adjId);
+          next.push(adjId);
+        }
+      }
+    }
+    queue = next;
+  }
+  return -1; // unreachable within 5 steps
+}
+
 export function canBuildSettlement(
   vertexId: string,
   playerId: string,
   vertices: Vertex[],
   settlements: Settlement[],
   roads: Road[],
-  isSetupPhase: boolean
+  isSetupPhase: boolean,
+  difficulty: Difficulty = 'normal'
 ): boolean {
   const vertex = vertices.find(v => v.id === vertexId);
   if (!vertex) return false;
@@ -275,20 +306,27 @@ export function canBuildSettlement(
   // Check no settlement already exists on this vertex
   if (settlements.some(s => s.vertexId === vertexId)) return false;
 
-  // Distance rule: no settlement on adjacent vertices
-  const hasAdjacentSettlement = vertex.adjacentVertexIds.some(adjVId =>
-    settlements.some(s => s.vertexId === adjVId)
+  // Distance rule: other players' settlements on adjacent vertices block building
+  // Own settlements do NOT block (19-tile board is too small for full Catan distance rule)
+  const hasAdjacentOpponentSettlement = vertex.adjacentVertexIds.some(adjVId =>
+    settlements.some(s => s.vertexId === adjVId && s.playerId !== playerId)
   );
-  if (hasAdjacentSettlement) return false;
+  if (hasAdjacentOpponentSettlement) return false;
 
-  // Only allow on vertices adjacent to at least one non-sea tile
-  const hasLandTile = vertex.adjacentTileIds.some(tileId => {
-    // tileId is the tile.id which equals the index
-    return true; // We already filtered sea-only vertices in generation
-  });
-
-  // During setup phase, can place anywhere (no road requirement)
-  if (isSetupPhase) return true;
+  // During setup phase: no road requirement, but own settlements must be 3+ edges apart
+  if (isSetupPhase) {
+    const ownSettlementVertexIds = settlements
+      .filter(s => s.playerId === playerId)
+      .map(s => s.vertexId);
+    if (ownSettlementVertexIds.length > 0) {
+      // BFS from vertexId: check min distance to any own settlement
+      for (const ownVid of ownSettlementVertexIds) {
+        const dist = bfsDistance(vertexId, ownVid, vertices);
+        if (dist >= 0 && dist < 3) return false; // too close
+      }
+    }
+    return true;
+  }
 
   // During normal play, must have a road connected to this vertex
   const playerRoadEdgeIds = roads.filter(r => r.playerId === playerId).map(r => r.edgeId);
@@ -356,11 +394,72 @@ export function getValidSettlementVertices(
   vertices: Vertex[],
   settlements: Settlement[],
   roads: Road[],
-  isSetupPhase: boolean
+  isSetupPhase: boolean,
+  difficulty: Difficulty = 'normal'
 ): string[] {
-  return vertices
-    .filter(v => canBuildSettlement(v.id, playerId, vertices, settlements, roads, isSetupPhase))
+  const result = vertices
+    .filter(v => canBuildSettlement(v.id, playerId, vertices, settlements, roads, isSetupPhase, difficulty))
     .map(v => v.id);
+
+  // --- Debug logging ---
+  if (!isSetupPhase) {
+    const playerRoads = roads.filter(r => r.playerId === playerId);
+    const playerRoadEdgeIds = new Set(playerRoads.map(r => r.edgeId));
+    const playerSettlementVids = new Set(settlements.filter(s => s.playerId === playerId).map(s => s.vertexId));
+
+    // Find all vertices connected to player's roads
+    const roadVertexIds = new Set<string>();
+    vertices.forEach(v => {
+      if (v.adjacentEdgeIds.some(eId => playerRoadEdgeIds.has(eId))) {
+        roadVertexIds.add(v.id);
+      }
+    });
+
+    const analysis: { vertex: string; canBuild: boolean; status: string; blockedBy: string; owner: string }[] = [];
+    roadVertexIds.forEach(vid => {
+      const v = vertices.find(vv => vv.id === vid)!;
+      const actualResult = canBuildSettlement(vid, playerId, vertices, settlements, roads, false, difficulty);
+
+      if (settlements.some(s => s.vertexId === vid)) {
+        const s = settlements.find(ss => ss.vertexId === vid)!;
+        analysis.push({ vertex: vid, canBuild: actualResult, status: 'OCCUPIED', blockedBy: '-', owner: s.playerId === playerId ? 'SELF' : 'OTHER' });
+        return;
+      }
+
+      // Check all adjacent settlements (both own and opponent)
+      const adjSettlements = v.adjacentVertexIds
+        .map(adjVId => settlements.find(s => s.vertexId === adjVId))
+        .filter(Boolean);
+
+      if (adjSettlements.length > 0) {
+        const blockerDescs = adjSettlements.map(bs => {
+          const isSelf = bs!.playerId === playerId;
+          return `${bs!.vertexId}(${isSelf ? 'SELF' : 'opponent'})`;
+        });
+        const hasOpponent = adjSettlements.some(bs => bs!.playerId !== playerId);
+        analysis.push({
+          vertex: vid,
+          canBuild: actualResult,
+          status: hasOpponent ? 'OPP_ADJ' : 'SELF_ADJ',
+          blockedBy: blockerDescs.join(', '),
+          owner: '-',
+        });
+      } else {
+        analysis.push({ vertex: vid, canBuild: actualResult, status: 'FREE', blockedBy: '-', owner: '-' });
+      }
+    });
+
+    console.group(`[Settlement] player=${playerId.slice(-6)}, difficulty=${difficulty}, roads=${playerRoads.length}, result=${result.length}`);
+    console.log('Player own settlements:', [...playerSettlementVids].join(', '));
+    console.log('All settlements:', settlements.map(s => `${s.vertexId}(${s.playerId === playerId ? 'SELF' : s.playerId.slice(-4)})`).join(', '));
+    console.table(analysis);
+    if (result.length === 0) {
+      console.warn('NO VALID VERTICES! Check canBuild column — any TRUE with wrong status indicates a bug.');
+    }
+    console.groupEnd();
+  }
+
+  return result;
 }
 
 // Get all valid edge IDs for building a road
@@ -455,16 +554,22 @@ export function calculateLongestRoad(
 // AI LOGIC
 // =============================================
 
-// AI: Choose best vertex for initial settlement placement
+// AI: Choose vertex for initial settlement placement (difficulty-scaled)
 export function aiChooseSetupVertex(
   playerId: string,
   tiles: GameTile[],
   vertices: Vertex[],
   settlements: Settlement[],
-  roads: Road[]
+  roads: Road[],
+  difficulty: Difficulty = 'easy'
 ): string | null {
   const valid = getValidSettlementVertices(playerId, vertices, settlements, roads, true);
   if (valid.length === 0) return null;
+
+  // Easy: pure random
+  if (difficulty === 'easy') {
+    return valid[Math.floor(Math.random() * valid.length)];
+  }
 
   // Score each vertex by the value of adjacent tiles
   const scored = valid.map(vId => {
@@ -473,17 +578,20 @@ export function aiChooseSetupVertex(
     vertex.adjacentTileIds.forEach(tileId => {
       const tile = tiles.find(t => t.id === tileId);
       if (!tile || tile.type === 'sea' || tile.type === 'desert') return;
-      // Higher probability dice numbers are more valuable
       const prob = tile.diceNumber <= 6 ? tile.diceNumber - 1 : 13 - tile.diceNumber;
-      score += prob;
-      // Diversity bonus
-      score += 1;
+      score += prob + 1;
     });
     return { vId, score };
   });
-
   scored.sort((a, b) => b.score - a.score);
-  // Pick from top 3 randomly for variety
+
+  // Normal: pick from top 50%
+  if (difficulty === 'normal') {
+    const topHalf = scored.slice(0, Math.max(1, Math.ceil(scored.length / 2)));
+    return topHalf[Math.floor(Math.random() * topHalf.length)].vId;
+  }
+
+  // Hard: pick from top 3
   const topN = scored.slice(0, Math.min(3, scored.length));
   return topN[Math.floor(Math.random() * topN.length)].vId;
 }
@@ -540,22 +648,34 @@ export function aiTurn(
   // Priority: Build settlement > Build road > Upgrade to city
   // Try to build settlement
   if (canAffordSim(BUILD_COSTS.settlement)) {
-    const validVertices = getValidSettlementVertices(player.id, vertices, settlements, roads, false);
+    const validVertices = getValidSettlementVertices(player.id, vertices, settlements, roads, false, difficulty);
     if (validVertices.length > 0) {
-      // Score vertices
-      const scored = validVertices.map(vId => {
-        const vertex = vertices.find(v => v.id === vId)!;
-        let score = 0;
-        vertex.adjacentTileIds.forEach(tileId => {
-          const tile = tiles.find(t => t.id === tileId);
-          if (!tile || tile.type === 'sea' || tile.type === 'desert') return;
-          const prob = tile.diceNumber <= 6 ? tile.diceNumber - 1 : 13 - tile.diceNumber;
-          score += prob;
+      let chosen: string;
+      if (difficulty === 'easy') {
+        // Pure random
+        chosen = validVertices[Math.floor(Math.random() * validVertices.length)];
+      } else {
+        // Score vertices
+        const scored = validVertices.map(vId => {
+          const vertex = vertices.find(v => v.id === vId)!;
+          let score = 0;
+          vertex.adjacentTileIds.forEach(tileId => {
+            const tile = tiles.find(t => t.id === tileId);
+            if (!tile || tile.type === 'sea' || tile.type === 'desert') return;
+            const prob = tile.diceNumber <= 6 ? tile.diceNumber - 1 : 13 - tile.diceNumber;
+            score += prob;
+          });
+          return { vId, score };
         });
-        return { vId, score };
-      });
-      scored.sort((a, b) => b.score - a.score);
-      const chosen = scored[0].vId;
+        scored.sort((a, b) => b.score - a.score);
+        if (difficulty === 'normal') {
+          const topHalf = scored.slice(0, Math.max(1, Math.ceil(scored.length / 2)));
+          chosen = topHalf[Math.floor(Math.random() * topHalf.length)].vId;
+        } else {
+          // Hard: best vertex
+          chosen = scored[0].vId;
+        }
+      }
       actions.push({ type: 'build_settlement', vertexId: chosen });
       payCostSim(BUILD_COSTS.settlement);
     }
@@ -603,7 +723,8 @@ export function aiTurn(
 // =============================================
 
 export function getRandomEvent(difficulty: Difficulty): EventCard | null {
-  const chance = difficulty === 'easy' ? 0.1 : difficulty === 'normal' ? 0.2 : 0.3;
+  // Events only trigger on dice 7 now, so use higher probability
+  const chance = difficulty === 'easy' ? 0.4 : difficulty === 'normal' ? 0.6 : 0.8;
   if (Math.random() > chance) return null;
 
   const event = EVENT_CARDS[Math.floor(Math.random() * EVENT_CARDS.length)];

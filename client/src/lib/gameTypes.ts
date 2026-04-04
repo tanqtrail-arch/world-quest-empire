@@ -205,16 +205,43 @@ export const HEX_LAYOUT: { q: number; r: number }[] = [
 
 // --- Tile Distribution ---
 export const TILE_DISTRIBUTION: TileType[] = [
-  'rubber', 'rubber', 'rubber', 'rubber',
-  'oil', 'oil', 'oil',
-  'gold', 'gold', 'gold',
-  'food', 'food', 'food', 'food',
+  'rubber', 'rubber', 'rubber', 'rubber', 'rubber',
+  'oil', 'oil', 'oil', 'oil',
+  'gold', 'gold', 'gold', 'gold',
+  'food', 'food', 'food', 'food', 'food',
   'desert',
-  'sea', 'sea', 'sea', 'sea',
 ];
 
 // --- Dice Numbers (excluding 7, distributed across non-sea/non-desert tiles) ---
 export const DICE_NUMBERS = [2, 3, 3, 4, 4, 5, 5, 6, 6, 8, 8, 9, 9, 10, 10, 11, 11, 12];
+
+// =============================================
+// LARGE MAP (4-5-6-5-4 layout for 5-6 players)
+// =============================================
+export const HEX_LAYOUT_LARGE: { q: number; r: number }[] = [
+  // Row 0 (4 tiles)
+  { q: 0, r: 0 }, { q: 1, r: 0 }, { q: 2, r: 0 }, { q: 3, r: 0 },
+  // Row 1 (5 tiles)
+  { q: -1, r: 1 }, { q: 0, r: 1 }, { q: 1, r: 1 }, { q: 2, r: 1 }, { q: 3, r: 1 },
+  // Row 2 (6 tiles)
+  { q: -2, r: 2 }, { q: -1, r: 2 }, { q: 0, r: 2 }, { q: 1, r: 2 }, { q: 2, r: 2 }, { q: 3, r: 2 },
+  // Row 3 (5 tiles)
+  { q: -2, r: 3 }, { q: -1, r: 3 }, { q: 0, r: 3 }, { q: 1, r: 3 }, { q: 2, r: 3 },
+  // Row 4 (4 tiles)
+  { q: -2, r: 4 }, { q: -1, r: 4 }, { q: 0, r: 4 }, { q: 1, r: 4 },
+];
+
+export const TILE_DISTRIBUTION_LARGE: TileType[] = [
+  'rubber', 'rubber', 'rubber', 'rubber', 'rubber', 'rubber',
+  'oil', 'oil', 'oil', 'oil', 'oil',
+  'gold', 'gold', 'gold', 'gold', 'gold',
+  'food', 'food', 'food', 'food', 'food', 'food', 'food',
+  'desert',
+];
+
+export const DICE_NUMBERS_LARGE = [2, 3, 3, 4, 4, 4, 5, 5, 5, 6, 6, 6, 8, 8, 8, 9, 9, 9, 10, 10, 11, 11, 12];
+
+export const ROWS_LARGE = [4, 5, 6, 5, 4];
 
 // --- Event Cards Data ---
 export const EVENT_CARDS: Omit<EventCard, 'id'>[] = [

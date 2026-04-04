@@ -130,15 +130,16 @@ export default function GameScreen() {
       <div className="absolute inset-0 bg-gradient-to-b from-black/20 via-transparent to-black/40 pointer-events-none" />
 
       {/* Main Content Column */}
-      <div className="relative z-10 flex flex-col" style={{ height: '100dvh' }}>
+      <div className="relative z-10 flex flex-col max-w-7xl mx-auto w-full" style={{ height: '100dvh' }}>
         {/* Top: Opponent Bar + Help Button */}
         <div className="shrink-0 relative">
           <OpponentBar />
           <button
             onClick={() => setShowHelp(!showHelp)}
-            className="absolute top-2 right-2 bg-white/20 backdrop-blur-sm rounded-full p-1.5 text-white hover:bg-white/30 transition-colors"
+            className="absolute top-2 right-2 bg-white/20 backdrop-blur-sm rounded-full p-1.5 md:p-2 text-white hover:bg-white/30 transition-colors"
           >
-            <HelpCircle size={18} />
+            <HelpCircle size={18} className="md:hidden" />
+            <HelpCircle size={22} className="hidden md:block" />
           </button>
           <AnimatePresence>
             {showHelp && <TileHelpTooltip onClose={() => setShowHelp(false)} />}
@@ -155,7 +156,7 @@ export default function GameScreen() {
               className="shrink-0 mx-2"
             >
               <div
-                className="text-center py-2 px-3 rounded-lg text-white text-sm font-heading font-bold shadow-lg"
+                className="text-center py-2 md:py-1 px-3 rounded-lg text-white text-sm md:text-xs font-heading font-bold shadow-lg"
                 style={{ backgroundColor: setupPlayer.color + 'dd' }}
               >
                 {setupPlayer.flagEmoji} {setupPlayer.name}の初期配置
@@ -176,7 +177,7 @@ export default function GameScreen() {
               className="shrink-0 mx-2"
             >
               <div
-                className="text-center py-1.5 px-3 rounded-lg text-white text-sm font-heading font-bold shadow-lg"
+                className="text-center py-1.5 md:py-1 px-3 rounded-lg text-white text-sm md:text-xs font-heading font-bold shadow-lg"
                 style={{ backgroundColor: currentAIAction.playerColor + 'dd' }}
               >
                 {currentAIAction.playerFlag} {currentAIAction.playerName}が行動中…
@@ -185,22 +186,20 @@ export default function GameScreen() {
           )}
         </AnimatePresence>
 
-        {/* Middle: Map + Dice (takes remaining space) */}
-        <div className="flex-1 flex flex-col items-center justify-center gap-1 px-2 overflow-hidden">
-          <HexMap />
-          {!isPlayingAI && !isSetup && phase !== 'handoff' && <DiceRoller />}
-        </div>
+        {/* PC: 2-column layout / Mobile: vertical stack */}
+        <div className="flex-1 min-h-0 flex flex-col md:flex-row gap-1 md:gap-3">
+          {/* Left: Map + Dice — fills remaining height, no scroll on PC */}
+          <div className="flex-1 min-h-0 flex flex-col items-center justify-center gap-1 px-2">
+            <HexMap />
+            {!isPlayingAI && !isSetup && phase !== 'handoff' && <DiceRoller />}
+          </div>
 
-        {/* Bottom Section: Log + Player + Actions */}
-        <div className="shrink-0 flex flex-col gap-1 pb-1">
-          {/* Game Log */}
-          <GameLog />
-
-          {/* Player Panel */}
-          {!isSetup && <PlayerPanel />}
-
-          {/* Action Menu - hidden during AI turns and setup */}
-          {!isPlayingAI && !isSetup && phase !== 'handoff' && <ActionMenu />}
+          {/* Right: Log + Player + Actions (sidebar on PC) */}
+          <div className="shrink-0 md:shrink md:w-80 lg:w-96 flex flex-col gap-1 pb-1 md:py-2 md:pr-2 md:overflow-y-auto">
+            <GameLog />
+            {!isSetup && <PlayerPanel />}
+            {!isPlayingAI && !isSetup && phase !== 'handoff' && <ActionMenu />}
+          </div>
         </div>
       </div>
 
