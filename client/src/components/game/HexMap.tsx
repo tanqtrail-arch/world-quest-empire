@@ -193,21 +193,9 @@ function HexTile({ tile, cx, cy, isHighlighted }: {
         </>
       )}
 
-      {/* Resource icon */}
-      <text
-        x={cx}
-        y={tile.type === 'sea' || tile.type === 'desert' ? cy - 2 : cy - 6}
-        textAnchor="middle"
-        dominantBaseline="middle"
-        fontSize={tile.type === 'sea' || tile.type === 'desert' ? 26 : 24}
-        className="select-none pointer-events-none"
-      >
-        {resInfo?.icon || (tile.type === 'desert' ? '🏜️' : '🌊')}
-      </text>
-
-      {/* Resource name */}
+      {/* Resource name (top) */}
       {tile.type !== 'sea' && tile.type !== 'desert' && (
-        <text x={cx} y={cy - 24} textAnchor="middle" dominantBaseline="middle"
+        <text x={cx} y={cy - 20} textAnchor="middle" dominantBaseline="middle"
           fontSize={10} fontWeight="bold" fill="white" className="select-none pointer-events-none"
           style={{ textShadow: '0 1px 3px rgba(0,0,0,0.8)' }}
         >
@@ -215,16 +203,28 @@ function HexTile({ tile, cx, cy, isHighlighted }: {
         </text>
       )}
 
-      {/* Dice number badge */}
+      {/* Resource icon (center) */}
+      <text
+        x={cx}
+        y={tile.type === 'sea' || tile.type === 'desert' ? cy : cy - 4}
+        textAnchor="middle"
+        dominantBaseline="middle"
+        fontSize={tile.type === 'sea' || tile.type === 'desert' ? 24 : 22}
+        className="select-none pointer-events-none"
+      >
+        {resInfo?.icon || (tile.type === 'desert' ? '🏜️' : '🌊')}
+      </text>
+
+      {/* Dice number badge (bottom) */}
       {tile.type !== 'sea' && tile.type !== 'desert' && tile.diceNumber > 0 && (
         <>
-          <circle cx={cx} cy={cy + 18} r={13}
+          <circle cx={cx} cy={cy + 20} r={12}
             fill={isHighlighted ? '#FFD700' : '#FFF8E1'}
             stroke={isHighlighted ? '#B8860B' : '#5C3D2E'}
             strokeWidth={isHighlighted ? 2.5 : 2}
           />
-          <text x={cx} y={cy + 19} textAnchor="middle" dominantBaseline="middle"
-            fontSize={15} fontWeight="bold" fontFamily="'Fredoka', sans-serif"
+          <text x={cx} y={cy + 21} textAnchor="middle" dominantBaseline="middle"
+            fontSize={14} fontWeight="bold" fontFamily="'Fredoka', sans-serif"
             fill={isHighlighted ? '#5C3D2E' : tile.diceNumber === 6 || tile.diceNumber === 8 ? '#E74C3C' : '#2C3E50'}
             className="select-none pointer-events-none"
           >

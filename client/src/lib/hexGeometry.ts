@@ -1,48 +1,49 @@
 /**
  * hexGeometry.ts
- * 正六角形のぴったりくっつけた配置と、頂点・辺の座標計算
+ * Pointy-top 正六角形のぴったりくっつけた配置と、頂点・辺の座標計算
  * HexMap (描画) と gameLogic (ロジック) の両方で使用
  *
- * Flat-top hexagon geometry:
- *   横間隔 = size * 1.5
- *   縦間隔 = size * sqrt(3)
- *   奇数q列は size * sqrt(3) / 2 だけ下にオフセット
+ * Pointy-top hexagon geometry (カタンと同じ):
+ *   六角形の上が尖っている
+ *   横間隔 = size * sqrt(3)
+ *   縦間隔 = size * 1.5
+ *   偶数行は size * sqrt(3) / 2 だけ右にオフセット
  *
- * ただし HEX_LAYOUT は offset coordinates (q, r) で
- * row-based layout (3-4-5-4-3) を使っているので
- * q/r → pixel 変換は row/col ベースで行う
+ * レイアウト: 3-4-5-4-3 の行ベース配置
  */
 
 import { HEX_LAYOUT } from './gameTypes';
 
 // --- Constants ---
-export const HEX_SIZE = 52;
-export const HEX_W = HEX_SIZE * 2;
-export const HEX_H = Math.sqrt(3) * HEX_SIZE;
+export const HEX_SIZE = 46; // 半径（中心から頂点まで）
+export const HEX_W = Math.sqrt(3) * HEX_SIZE; // 横幅 = sqrt(3) * size ≈ 79.7
+export const HEX_H = HEX_SIZE * 2;             // 縦幅 = 2 * size = 92
+
+// Pointy-top hex: ぴったりくっつける間隔
+export const COL_SPACING = HEX_W;              // 横方向: sqrt(3) * size
+export const ROW_SPACING = HEX_SIZE * 1.5;     // 縦方向: 1.5 * size
+
+// 行ごとのタイル数
 export const ROWS = [3, 4, 5, 4, 3];
+const MAX_COLS = Math.max(...ROWS); // 5
 
-// Flat-top hex: ぴったりくっつける間隔
-// 横方向: size * 1.5 (= HEX_W * 0.75)
-// 縦方向: sqrt(3) * size (= HEX_H)
-export const COL_SPACING = HEX_SIZE * 1.5;  // = 78
-export const ROW_SPACING = HEX_H;           // = sqrt(3) * 52 ≈ 90.07
+// SVG全体のサイズ計算（余白含む）
+const PADDING = 30;
+export const SVG_WIDTH = MAX_COLS * COL_SPACING + COL_SPACING / 2 + PADDING * 2;
+export const SVG_HEIGHT = (ROWS.length - 1) * ROW_SPACING + HEX_H + PADDING * 2;
 
-// SVG全体のサイズ計算
-const MAX_COLS = Math.max(...ROWS);
-export const SVG_WIDTH = MAX_COLS * COL_SPACING + HEX_SIZE + 40;
-export const SVG_HEIGHT = ROWS.length * ROW_SPACING + HEX_SIZE + 40;
-
-// --- Flat-top hex: タイルのインデックスからピクセル中心座標を計算 ---
+// --- Pointy-top hex: タイルのインデックスからピクセル中心座標を計算 ---
 export function getTileCenter(tileIndex: number): { x: number; y: number } {
   let idx = 0;
   for (let row = 0; row < ROWS.length; row++) {
     const count = ROWS[row];
     for (let col = 0; col < count; col++) {
       if (idx === tileIndex) {
-        // 行ごとのオフセット: 中央揃え
-        const rowOffset = (MAX_COLS - count) * COL_SPACING / 2;
-        const cx = rowOffset + col * COL_SPACING + HEX_SIZE + 20;
-        const cy = row * ROW_SPACING + HEX_SIZE + 20;
+        // 中央揃え: 各行のタイル数に応じてオフセット
+        // 最大列数(5)に対して、少ない行は右にずらす
+        const rowOffsetX = ((MAX_COLS - count) / 2) * COL_SPACING;
+        const cx = PADDING + COL_SPACING / 2 + col * COL_SPACING + rowOffsetX;
+        const cy = PADDING + HEX_SIZE + row * ROW_SPACING;
         return { x: cx, y: cy };
       }
       idx++;
@@ -51,13 +52,14 @@ export function getTileCenter(tileIndex: number): { x: number; y: number } {
   return { x: 0, y: 0 };
 }
 
-// --- Flat-top hex: 6つの頂点座標を取得 ---
-// Flat-top hexagon の頂点は角度 0°, 60°, 120°, 180°, 240°, 300°
-// (角度0 = 右端)
+// --- Pointy-top hex: 6つの頂点座標を取得 ---
+// Pointy-top hexagon の頂点は角度 -90°, -30°, 30°, 90°, 150°, 210°
+// (角度-90° = 上端の尖り)
+// 頂点順序: 0=上, 1=右上, 2=右下, 3=下, 4=左下, 5=左上
 export function getHexCorners(cx: number, cy: number, size: number = HEX_SIZE): { x: number; y: number }[] {
   const corners: { x: number; y: number }[] = [];
   for (let i = 0; i < 6; i++) {
-    const angle = (Math.PI / 3) * i; // 0, 60, 120, 180, 240, 300 degrees
+    const angle = (Math.PI / 3) * i - Math.PI / 2; // Start from -90° (top)
     corners.push({
       x: cx + size * Math.cos(angle),
       y: cy + size * Math.sin(angle),
