@@ -68,6 +68,13 @@ export default function TitleScreen() {
         </button>
 
         <button
+          onClick={() => setScreen('quiz_practice')}
+          className="game-btn-blue text-xl py-4 rounded-2xl"
+        >
+          📝 クイズ練習
+        </button>
+
+        <button
           onClick={() => setScreen('ranking')}
           className="game-btn-gold text-xl py-4 rounded-2xl"
         >

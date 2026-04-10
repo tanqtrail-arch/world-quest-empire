@@ -10,6 +10,7 @@ import CreateRoom from "./pages/CreateRoom";
 import GameScreen from "./pages/GameScreen";
 import ResultScreen from "./pages/ResultScreen";
 import RankingScreen from "./pages/RankingScreen";
+import QuizPracticeScreen from "./pages/QuizPracticeScreen";
 
 function ScreenRouter() {
   const screen = useGameStore(s => s.screen);
@@ -25,6 +26,8 @@ function ScreenRouter() {
       return <ResultScreen />;
     case 'ranking':
       return <RankingScreen />;
+    case 'quiz_practice':
+      return <QuizPracticeScreen />;
     default:
       return <TitleScreen />;
   }

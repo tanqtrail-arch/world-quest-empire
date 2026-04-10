@@ -267,6 +267,7 @@ export function payCost(player: Player, cost: Partial<Resources>): void {
 }
 
 // Check if a vertex is valid for building a settlement
+// 条件: (1) その頂点に誰の拠点もない (2) setupならどこでもOK (3) 通常は自分の道に隣接
 export function canBuildSettlement(
   vertexId: string,
   playerId: string,
@@ -278,27 +279,10 @@ export function canBuildSettlement(
 ): boolean {
   const vertex = vertices.find(v => v.id === vertexId);
   if (!vertex) return false;
-
-  // Check no settlement already exists on this vertex (any player)
   if (settlements.some(s => s.vertexId === vertexId)) return false;
-
-  // Check no opponent settlement on adjacent vertices
-  const hasAdjacentOpponentSettlement = vertex.adjacentVertexIds.some(adjVId =>
-    settlements.some(s => s.vertexId === adjVId && s.playerId !== playerId)
-  );
-  if (hasAdjacentOpponentSettlement) return false;
-
-  // During setup phase: no road requirement
-  if (isSetupPhase) {
-    return true;
-  }
-
-  // During normal play, must have a road connected to this vertex
+  if (isSetupPhase) return true;
   const playerRoadEdgeIds = roads.filter(r => r.playerId === playerId).map(r => r.edgeId);
-  const vertexEdges = vertex.adjacentEdgeIds;
-  const hasRoad = vertexEdges.some(eId => playerRoadEdgeIds.includes(eId));
-
-  return hasRoad;
+  return vertex.adjacentEdgeIds.some(eId => playerRoadEdgeIds.includes(eId));
 }
 
 // Check if an edge is valid for building a road
@@ -370,7 +354,6 @@ export function getValidSettlementVertices(
   if (!isSetupPhase) {
     const playerRoads = roads.filter(r => r.playerId === playerId);
     const playerRoadEdgeIds = new Set(playerRoads.map(r => r.edgeId));
-    const playerSettlementVids = new Set(settlements.filter(s => s.playerId === playerId).map(s => s.vertexId));
 
     // Find all vertices connected to player's roads
     const roadVertexIds = new Set<string>();
@@ -380,46 +363,22 @@ export function getValidSettlementVertices(
       }
     });
 
-    const analysis: { vertex: string; canBuild: boolean; status: string; blockedBy: string; owner: string }[] = [];
+    const analysis: { vertex: string; canBuild: boolean; reason: string }[] = [];
     roadVertexIds.forEach(vid => {
-      const v = vertices.find(vv => vv.id === vid)!;
-      const actualResult = canBuildSettlement(vid, playerId, vertices, settlements, roads, false, difficulty);
-
+      const canBuild = canBuildSettlement(vid, playerId, vertices, settlements, roads, false, difficulty);
       if (settlements.some(s => s.vertexId === vid)) {
-        const s = settlements.find(ss => ss.vertexId === vid)!;
-        analysis.push({ vertex: vid, canBuild: actualResult, status: 'OCCUPIED', blockedBy: '-', owner: s.playerId === playerId ? 'SELF' : 'OTHER' });
-        return;
-      }
-
-      // Check all adjacent settlements (both own and opponent)
-      const adjSettlements = v.adjacentVertexIds
-        .map(adjVId => settlements.find(s => s.vertexId === adjVId))
-        .filter(Boolean);
-
-      if (adjSettlements.length > 0) {
-        const blockerDescs = adjSettlements.map(bs => {
-          const isSelf = bs!.playerId === playerId;
-          return `${bs!.vertexId}(${isSelf ? 'SELF' : 'opponent'})`;
-        });
-        const hasOpponent = adjSettlements.some(bs => bs!.playerId !== playerId);
-        analysis.push({
-          vertex: vid,
-          canBuild: actualResult,
-          status: hasOpponent ? 'OPP_ADJ' : 'SELF_ADJ',
-          blockedBy: blockerDescs.join(', '),
-          owner: '-',
-        });
+        analysis.push({ vertex: vid, canBuild, reason: 'OCCUPIED' });
+      } else if (!canBuild) {
+        analysis.push({ vertex: vid, canBuild, reason: 'NO_ROAD' });
       } else {
-        analysis.push({ vertex: vid, canBuild: actualResult, status: 'FREE', blockedBy: '-', owner: '-' });
+        analysis.push({ vertex: vid, canBuild, reason: 'OK' });
       }
     });
 
-    console.group(`[Settlement] player=${playerId.slice(-6)}, difficulty=${difficulty}, roads=${playerRoads.length}, result=${result.length}`);
-    console.log('Player own settlements:', [...playerSettlementVids].join(', '));
-    console.log('All settlements:', settlements.map(s => `${s.vertexId}(${s.playerId === playerId ? 'SELF' : s.playerId.slice(-4)})`).join(', '));
+    console.group(`[Settlement] player=${playerId.slice(-6)}, roads=${playerRoads.length}, valid=${result.length}`);
     console.table(analysis);
     if (result.length === 0) {
-      console.warn('NO VALID VERTICES! Check canBuild column — any TRUE with wrong status indicates a bug.');
+      console.warn('NO VALID VERTICES!');
     }
     console.groupEnd();
   }

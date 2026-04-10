@@ -95,7 +95,7 @@ export default function OpponentBar() {
   }, [showResourceGains, resourceGains]);
 
   return (
-    <div className="flex gap-1.5 md:gap-1.5 px-2 md:px-3 py-1.5 md:py-1 overflow-x-auto">
+    <div className="flex gap-1.5 px-2 py-1.5 overflow-x-auto md:flex-col md:gap-1.5 md:px-0 md:py-0 md:overflow-x-visible">
       {opponents.map(opp => {
         const isActive = isPlayingAI && currentAIAction?.playerId === opp.id;
         const playerPopups = popups.filter(p => p.playerId === opp.id);
@@ -109,7 +109,7 @@ export default function OpponentBar() {
               boxShadow: [`0 0 0px ${opp.color}`, `0 0 16px ${opp.color}`, `0 0 0px ${opp.color}`],
             } : { scale: 1 }}
             transition={isActive ? { duration: 1.5, repeat: Infinity } : {}}
-            className="relative flex items-center gap-1.5 md:gap-1.5 rounded-xl px-2 md:px-2 py-1.5 md:py-1 shrink-0 transition-all duration-300"
+            className="relative flex items-center gap-1.5 rounded-xl px-2 py-1.5 shrink-0 md:w-full md:py-1.5 transition-all duration-300"
             style={{
               background: isActive ? `${opp.color}44` : 'rgba(0,0,0,0.55)',
               backdropFilter: 'blur(4px)',

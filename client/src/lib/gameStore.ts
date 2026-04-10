@@ -4,9 +4,9 @@ import {
   type Player, type GameTile, type Vertex, type Edge,
   type Settlement, type Road, type Port, type Resources, type ResourceType,
   type EventCard, type GameLogEntry, type Difficulty, type GamePhase,
-  type SetupStep, type PlayerSlot,
+  type SetupStep, type PlayerSlot, type QuizQuestion, type QuizDifficulty,
   BUILD_COSTS, VP_VALUES, WINNING_SCORE, PLAYER_COLORS, RESOURCE_INFO,
-  TRADE_RATE_DEFAULT,
+  TRADE_RATE_DEFAULT, QUIZ_QUESTIONS, QUIZ_TIMER_SECONDS, TURN_TIMER_SECONDS,
 } from './gameTypes';
 import {
   generateMap, generateVerticesAndEdges, getMapRows, createPlayer, rollDice,
@@ -57,7 +57,7 @@ interface ResourceGainPopup {
 
 // --- Game Store Interface ---
 interface GameStore {
-  screen: 'title' | 'create' | 'game' | 'result' | 'ranking';
+  screen: 'title' | 'create' | 'game' | 'result' | 'ranking' | 'quiz_practice';
   setScreen: (screen: GameStore['screen']) => void;
 
   // Game state
@@ -124,9 +124,25 @@ interface GameStore {
   // Handoff (local multiplayer)
   handoffPlayerIndex: number | null;
 
+  // Quiz system
+  quizDifficulty: QuizDifficulty;
+  currentQuiz: QuizQuestion | null;
+  quizResult: 'correct' | 'incorrect' | 'timeout' | null;
+  quizResourcePickRemaining: number; // 正解時の資源選択残り数
+
+  // Turn timer
+  timerEnabled: boolean;
+  turnTimeRemaining: number;
+  turnTimerActive: boolean;
+  turnTimerPausedForQuiz: boolean;
+
+  // Gold dice (7確定)
+  usedGoldDice: boolean;
+
   // Actions
-  initGame: (slots: PlayerSlot[], difficulty: Difficulty) => void;
+  initGame: (slots: PlayerSlot[], difficulty: Difficulty, quizDifficulty?: QuizDifficulty, timerEnabled?: boolean) => void;
   doRollDice: () => void;
+  doForceSevenDice: () => void;
   dismissResourceGains: () => void;
   startBuild: (type: 'settlement' | 'city' | 'road') => void;
   cancelBuild: () => void;
@@ -136,6 +152,11 @@ interface GameStore {
   doTrade: (give: ResourceType, receive: ResourceType) => void;
   handleEvent: () => void;
   pickResource: (resource: ResourceType) => void;
+  handleQuizAnswer: (selectedIndex: number) => void;
+  handleQuizTimeout: () => void;
+  pickQuizReward: (resource: ResourceType) => void;
+  dismissQuiz: () => void;
+  tickTurnTimer: () => void;
   doEndTurn: () => void;
   playNextAIAction: () => void;
   getCurrentPlayer: () => Player;
@@ -192,10 +213,22 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
   handoffPlayerIndex: null,
 
+  quizDifficulty: 'elementary_high' as QuizDifficulty,
+  currentQuiz: null,
+  quizResult: null,
+  quizResourcePickRemaining: 0,
+
+  timerEnabled: true,
+  turnTimeRemaining: TURN_TIMER_SECONDS,
+  turnTimerActive: false,
+  turnTimerPausedForQuiz: false,
+
+  usedGoldDice: false,
+
   // =============================================
   // INIT GAME
   // =============================================
-  initGame: (slots, difficulty) => {
+  initGame: (slots, difficulty, quizDifficulty = 'elementary_high' as QuizDifficulty, timerEnabled = true) => {
     const mapRows = getMapRows(slots.length);
     const tiles = generateMap(slots.length);
     const { vertices, edges } = generateVerticesAndEdges(tiles, mapRows);
@@ -260,6 +293,15 @@ export const useGameStore = create<GameStore>((set, get) => ({
       aiActionQueue: [],
       currentAIAction: null,
       handoffPlayerIndex: null,
+      quizDifficulty,
+      currentQuiz: null,
+      quizResult: null,
+      quizResourcePickRemaining: 0,
+      timerEnabled,
+      turnTimeRemaining: TURN_TIMER_SECONDS,
+      turnTimerActive: false,
+      turnTimerPausedForQuiz: false,
+      usedGoldDice: false,
     });
 
     // Auto-process AI setup if first player is AI
@@ -408,6 +450,9 @@ export const useGameStore = create<GameStore>((set, get) => ({
         currentPlayerIndex: 0,
         gameLog: [...state.gameLog, ...logs],
         highlightedEdgeIds: [],
+        turnTimeRemaining: TURN_TIMER_SECONDS,
+        turnTimerActive: !needHandoff,
+        turnTimerPausedForQuiz: false,
       });
     } else {
       const nextPlayer = state.players[nextPlayerIndex];
@@ -495,9 +540,6 @@ export const useGameStore = create<GameStore>((set, get) => ({
       .filter(t => t.diceNumber === total && t.type !== 'sea' && t.type !== 'desert')
       .map(t => t.id);
 
-    // Event only on 7
-    const event = total === 7 ? getRandomEvent(state.difficulty) : null;
-
     // --- Staged animation sequence ---
     // Step 1: Dice result shown (DiceRoller already shows it)
     // IMPORTANT: clear highlightedTileIds first to avoid stale highlights
@@ -505,7 +547,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
       diceResult: dice,
       phase: 'action',
       gameLog: [...state.gameLog, ...logs],
-      pendingEvent: event || null,
+      pendingEvent: null,
       diceAnimationStep: 1 as 0 | 1 | 2 | 3 | 4,
       highlightedTileIds: [],
       showResourceGains: false,
@@ -515,6 +557,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
     if (total === 7) {
       // Lucky 7: skip tile highlight/flag steps, go straight to resource summary
+      // After dismissing resource gains, quiz will be triggered
       setTimeout(() => {
         set({ diceAnimationStep: 4 as 0 | 1 | 2 | 3 | 4, showResourceGains: true });
       }, 500);
@@ -537,85 +580,95 @@ export const useGameStore = create<GameStore>((set, get) => ({
   },
 
   // =============================================
+  // FORCE SEVEN DICE (金4枚消費で7確定)
+  // =============================================
+  doForceSevenDice: () => {
+    const state = get();
+    if (state.phase !== 'rolling') return;
+    if (state.usedGoldDice) return;
+    const player = state.players[state.currentPlayerIndex];
+    if (player.resources.gold < 4) return;
+
+    // 金4枚消費
+    const newPlayers = state.players.map(p => {
+      if (p.id !== player.id) return p;
+      return { ...p, resources: { ...p.resources, gold: p.resources.gold - 4 } };
+    });
+
+    set({ players: newPlayers, usedGoldDice: true });
+
+    // 7確定でdoRollDiceと同等処理を実行
+    const dice: [number, number] = [3, 4];
+    const total = 7;
+    const currentPlayer = newPlayers[state.currentPlayerIndex];
+
+    const logs: GameLogEntry[] = [
+      generateGameLog(`💰 ${currentPlayer.name}が金4枚を使って7を確定！ 🎲 3 + 4 = 7`, 'trade', currentPlayer.id),
+    ];
+
+    const updatedPlayers = newPlayers.map(p => ({ ...p, resources: { ...p.resources } }));
+    const rollingPlayer = updatedPlayers.find(p => p.id === currentPlayer.id)!;
+    const allRes: ResourceType[] = ['rubber', 'oil', 'gold', 'food'];
+    allRes.forEach(res => { rollingPlayer.resources[res] += 1; });
+    logs.push(generateGameLog(`🎲7！${currentPlayer.name}が全資源+1！`, 'resource', currentPlayer.id));
+
+    const resourceGainPopups: ResourceGainPopup[] = [{
+      playerId: currentPlayer.id,
+      playerName: currentPlayer.name,
+      playerFlag: currentPlayer.flagEmoji,
+      playerColor: currentPlayer.color,
+      resource: 'rubber',
+      amount: 1,
+    }];
+
+    set({
+      diceResult: dice,
+      phase: 'action',
+      gameLog: [...state.gameLog, ...logs],
+      pendingEvent: null,
+      diceAnimationStep: 1 as 0 | 1 | 2 | 3 | 4,
+      highlightedTileIds: [],
+      showResourceGains: false,
+      resourceGains: resourceGainPopups,
+      players: updatedPlayers,
+    });
+
+    setTimeout(() => {
+      set({ diceAnimationStep: 4 as 0 | 1 | 2 | 3 | 4, showResourceGains: true });
+    }, 500);
+  },
+
+  // =============================================
   // DISMISS RESOURCE GAINS
   // =============================================
   dismissResourceGains: () => {
     const state = get();
-    const pendingEvent = state.pendingEvent;
+    const diceTotal = state.diceResult ? state.diceResult[0] + state.diceResult[1] : 0;
+    console.log('[dismissResourceGains] diceTotal=', diceTotal, 'quizDifficulty=', state.quizDifficulty);
 
-    if (pendingEvent) {
-      // Pre-compute the event effect so the popup can show before→after
-      const player = state.players[state.currentPlayerIndex];
-      const resources: ResourceType[] = ['rubber', 'oil', 'gold', 'food'];
-      const resName = (r: ResourceType) => RESOURCE_INFO[r].icon + RESOURCE_INFO[r].name;
-      let preview: GameStore['eventEffectPreview'] = null;
-
-      if (pendingEvent.effectType === 'lose_resources') {
-        const r = resources[Math.floor(Math.random() * resources.length)];
-        const loss = Math.min(player.resources[r], pendingEvent.effectValue);
-        preview = {
-          description: `${resName(r)}を${loss}つ失う！`,
-          resourceChanges: [{ resource: r, before: player.resources[r], after: player.resources[r] - loss }],
-          preRolledResource: r,
-        };
-      } else if (pendingEvent.effectType === 'lose_food') {
-        const loss = Math.min(player.resources.food, pendingEvent.effectValue);
-        preview = {
-          description: `🌾食料を${loss}つ失う！`,
-          resourceChanges: [{ resource: 'food' as ResourceType, before: player.resources.food, after: player.resources.food - loss }],
-        };
-      } else if (pendingEvent.effectType === 'lose_structure') {
-        const mySett = state.settlements.filter(s => s.playerId === player.id && s.level === 'settlement');
-        preview = {
-          description: mySett.length > 0 ? '拠点が1つ失われる！' : '失う拠点がなかった！',
-          resourceChanges: [],
-          vpBefore: player.victoryPoints,
-          vpAfter: mySett.length > 0 ? Math.max(0, player.victoryPoints - 1) : player.victoryPoints,
-        };
-      } else if (pendingEvent.effectType === 'skip_turn') {
-        preview = {
-          description: 'このターンは行動できない！',
-          resourceChanges: [],
-        };
-      } else if (pendingEvent.effectType === 'gain_resources') {
-        preview = {
-          description: `好きな資源を${pendingEvent.effectValue}つ選ぼう！`,
-          resourceChanges: [],
-          isChoice: true,
-        };
-      } else if (pendingEvent.effectType === 'gain_all') {
-        preview = {
-          description: '🌿+1 🛢️+1 💰+1 🌾+1 全部もらえる！',
-          resourceChanges: resources.map(r => ({
-            resource: r,
-            before: player.resources[r],
-            after: player.resources[r] + pendingEvent.effectValue,
-          })),
-        };
-      } else if (pendingEvent.effectType === 'discount_build') {
-        preview = {
-          description: '好きな資源を2つ選ぼう！',
-          resourceChanges: [],
-          isChoice: true,
-        };
-      } else if (pendingEvent.effectType === 'free_road') {
-        const validEdges = getValidRoadEdges(player.id, state.edges, state.vertices, state.settlements, state.roads, false);
-        preview = {
-          description: validEdges.length > 0 ? '道を1つ無料で建設！' : '建設できる場所がなかった！',
-          resourceChanges: [],
-          freeRoadBuilt: validEdges.length > 0,
-        };
+    if (diceTotal === 7) {
+      // 7が出た → クイズ出題
+      const quizPool = QUIZ_QUESTIONS.filter(q => q.difficulty === state.quizDifficulty);
+      console.log('[dismissResourceGains] quizPool size=', quizPool.length);
+      if (quizPool.length === 0) {
+        console.error('[dismissResourceGains] NO QUIZ QUESTIONS for difficulty:', state.quizDifficulty);
+        set({ showResourceGains: false, highlightedTileIds: [], diceAnimationStep: 0 as 0 | 1 | 2 | 3 | 4 });
+        return;
       }
+      const quiz = quizPool[Math.floor(Math.random() * quizPool.length)];
+      console.log('[dismissResourceGains] selected quiz:', quiz.id, quiz.question);
 
       set({
         showResourceGains: false,
         highlightedTileIds: [],
         diceAnimationStep: 0 as 0 | 1 | 2 | 3 | 4,
-        phase: 'event',
-        currentEvent: pendingEvent,
-        pendingEvent: null,
-        eventEffectPreview: preview,
+        phase: 'quiz',
+        currentQuiz: quiz,
+        quizResult: null,
+        quizResourcePickRemaining: 0,
+        turnTimerPausedForQuiz: true,
       });
+      console.log('[dismissResourceGains] phase set to quiz, currentQuiz set');
     } else {
       set({
         showResourceGains: false,
@@ -1037,6 +1090,117 @@ export const useGameStore = create<GameStore>((set, get) => ({
   },
 
   // =============================================
+  // QUIZ SYSTEM
+  // =============================================
+  handleQuizAnswer: (selectedIndex: number) => {
+    const state = get();
+    if (!state.currentQuiz || state.quizResult) return;
+
+    const isCorrect = selectedIndex === state.currentQuiz.correctIndex;
+    const player = state.players[state.currentPlayerIndex];
+
+    if (isCorrect) {
+      set({
+        quizResult: 'correct',
+        quizResourcePickRemaining: 2,
+        gameLog: [...state.gameLog, generateGameLog(`🎉 ${player.name}がクイズに正解！好きな資源を2つ獲得！`, 'event', player.id)],
+      });
+    } else {
+      // 不正解: ランダム資源2つ失う
+      const allRes: ResourceType[] = ['rubber', 'oil', 'gold', 'food'];
+      const newPlayers = state.players.map(p => {
+        if (p.id !== player.id) return p;
+        const newRes = { ...p.resources };
+        for (let i = 0; i < 2; i++) {
+          const available = allRes.filter(r => newRes[r] > 0);
+          if (available.length === 0) break;
+          const r = available[Math.floor(Math.random() * available.length)];
+          newRes[r] -= 1;
+        }
+        return { ...p, resources: newRes };
+      });
+
+      set({
+        quizResult: 'incorrect',
+        players: newPlayers,
+        gameLog: [...state.gameLog, generateGameLog(`💥 ${player.name}がクイズに不正解…資源を2つ失った`, 'event', player.id)],
+      });
+    }
+  },
+
+  handleQuizTimeout: () => {
+    const state = get();
+    if (!state.currentQuiz || state.quizResult) return;
+
+    const player = state.players[state.currentPlayerIndex];
+    const allRes: ResourceType[] = ['rubber', 'oil', 'gold', 'food'];
+    const newPlayers = state.players.map(p => {
+      if (p.id !== player.id) return p;
+      const newRes = { ...p.resources };
+      for (let i = 0; i < 2; i++) {
+        const available = allRes.filter(r => newRes[r] > 0);
+        if (available.length === 0) break;
+        const r = available[Math.floor(Math.random() * available.length)];
+        newRes[r] -= 1;
+      }
+      return { ...p, resources: newRes };
+    });
+
+    set({
+      quizResult: 'timeout',
+      players: newPlayers,
+      gameLog: [...state.gameLog, generateGameLog(`⏰ ${player.name}が時間切れ…資源を2つ失った`, 'event', player.id)],
+    });
+  },
+
+  pickQuizReward: (resource: ResourceType) => {
+    const state = get();
+    if (state.quizResourcePickRemaining <= 0) return;
+
+    const player = state.players[state.currentPlayerIndex];
+    const newPlayers = state.players.map(p => {
+      if (p.id !== player.id) return p;
+      return { ...p, resources: { ...p.resources, [resource]: p.resources[resource] + 1 } };
+    });
+
+    const remaining = state.quizResourcePickRemaining - 1;
+    const resName = RESOURCE_INFO[resource].icon + RESOURCE_INFO[resource].name;
+
+    set({
+      players: newPlayers,
+      quizResourcePickRemaining: remaining,
+      gameLog: [...state.gameLog, generateGameLog(`${player.name}が${resName}を獲得！${remaining > 0 ? `（あと${remaining}つ）` : ''}`, 'resource', player.id)],
+    });
+  },
+
+  dismissQuiz: () => {
+    set({
+      phase: 'action',
+      currentQuiz: null,
+      quizResult: null,
+      quizResourcePickRemaining: 0,
+      turnTimerPausedForQuiz: false,
+    });
+  },
+
+  // =============================================
+  // TURN TIMER
+  // =============================================
+  tickTurnTimer: () => {
+    const state = get();
+    if (!state.timerEnabled || !state.turnTimerActive || state.turnTimerPausedForQuiz) return;
+    if (state.isPlayingAI || state.phase === 'setup' || state.phase === 'finished' || state.phase === 'handoff') return;
+
+    const newTime = state.turnTimeRemaining - 1;
+    if (newTime <= 0) {
+      set({ turnTimeRemaining: 0, turnTimerActive: false });
+      get().doEndTurn();
+    } else {
+      set({ turnTimeRemaining: newTime });
+    }
+  },
+
+  // =============================================
   // END TURN (handles AI turns and local multiplayer handoff)
   // =============================================
   doEndTurn: () => {
@@ -1088,9 +1252,18 @@ export const useGameStore = create<GameStore>((set, get) => ({
           playerColor: aiP.color,
         });
 
-        // AI rolls dice
-        const dice = rollDice();
-        const total = dice[0] + dice[1];
+        // AI rolls dice (hard AI with gold>=6 forces 7)
+        let dice: [number, number];
+        let total: number;
+        if (state.difficulty === 'hard' && aiP.resources.gold >= 6) {
+          dice = [3, 4];
+          total = 7;
+          aiP.resources.gold -= 4;
+          logs.push(generateGameLog(`💰 ${aiP.name}が金4枚を使って7を確定！`, 'trade', aiP.id));
+        } else {
+          dice = rollDice();
+          total = dice[0] + dice[1];
+        }
         const resName = (r: ResourceType) => RESOURCE_INFO[r].icon + RESOURCE_INFO[r].name;
 
         const matchingTileIds = state.tiles
@@ -1423,6 +1596,11 @@ export const useGameStore = create<GameStore>((set, get) => ({
         highlightedEdgeIds: [],
         showResourceGains: false,
         resourceGains: [],
+        // Timer: start if going directly to rolling (no handoff)
+        turnTimeRemaining: TURN_TIMER_SECONDS,
+        turnTimerActive: !needHandoff,
+        turnTimerPausedForQuiz: false,
+        usedGoldDice: false,
       });
     }
   },
@@ -1465,6 +1643,10 @@ export const useGameStore = create<GameStore>((set, get) => ({
           settlements: finalSettlements || state.settlements,
           roads: finalRoads || state.roads,
           highlightedTileIds: [],
+          turnTimeRemaining: TURN_TIMER_SECONDS,
+          turnTimerActive: !needHandoff,
+          turnTimerPausedForQuiz: false,
+          usedGoldDice: false,
         });
       }
       return;
@@ -1632,6 +1814,10 @@ export const useGameStore = create<GameStore>((set, get) => ({
       handoffPlayerIndex: null,
       highlightedTileIds: [],
       diceAnimationStep: 0 as 0 | 1 | 2 | 3 | 4,
+      turnTimeRemaining: TURN_TIMER_SECONDS,
+      turnTimerActive: true,
+      turnTimerPausedForQuiz: false,
+      usedGoldDice: false,
     });
   },
 

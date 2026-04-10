@@ -338,7 +338,7 @@ export default function HexMap() {
     : highlightedEdgeIds;
 
   return (
-    <div className="flex flex-col items-center w-full min-h-0 md:flex-1">
+    <div className="flex flex-col items-center w-full min-h-0 md:flex-1 md:h-full">
       {/* Build/Setup mode indicator */}
       {(buildMode || (phase === 'setup' && setupPhase)) && (
         <motion.div
@@ -364,12 +364,12 @@ export default function HexMap() {
       {/* Map Container */}
       <div
         ref={mapRef}
-        className="w-full max-h-[55vh] overflow-auto md:max-h-none md:overflow-visible md:flex-1 md:min-h-0"
+        className="w-full max-h-[55vh] overflow-auto md:max-h-none md:overflow-visible md:flex-1 md:min-h-0 md:h-full md:flex md:items-center md:justify-center"
       >
         <svg
           viewBox={`0 0 ${svgW} ${svgH}`}
           preserveAspectRatio="xMidYMid meet"
-          className="drop-shadow-lg w-full h-auto min-w-[360px] min-h-[300px] md:min-w-0 md:min-h-0 md:h-full md:w-full"
+          className="drop-shadow-lg w-full h-auto min-w-[360px] min-h-[300px] md:min-w-0 md:min-h-0 md:h-full md:w-full md:max-h-full"
         >
           {/* Layer 1: Hex Tiles */}
           {tiles.map((tile, tileIdx) => {
@@ -402,29 +402,39 @@ export default function HexMap() {
             const dx = midX - centerX;
             const dy = midY - centerY;
             const dist = Math.sqrt(dx * dx + dy * dy);
-            const offsetDist = 18;
+            const offsetDist = 22;
             const portX = midX + (dx / dist) * offsetDist;
             const portY = midY + (dy / dist) * offsetDist;
 
             const rateLabel = port.type === 'general' ? '3:1' : '2:1';
             const portIcon = port.type === 'general' ? '⚓' : RESOURCE_INFO[port.type as ResourceType].icon;
 
+            // Check if current player has a settlement on this port's vertices
+            const myId = currentPlayer?.id;
+            const isMyPort = myId && port.vertexIds.some(vid =>
+              settlements.some(s => s.vertexId === vid && s.playerId === myId)
+            );
+
             return (
               <g key={port.id}>
                 {/* Connection lines to vertices */}
                 <line
                   x1={v1.x} y1={v1.y} x2={portX} y2={portY}
-                  stroke="#8B6914" strokeWidth={1.5} strokeDasharray="3,3" opacity={0.5}
+                  stroke={isMyPort ? '#FFD700' : '#8B6914'} strokeWidth={isMyPort ? 2 : 1.5}
+                  strokeDasharray="3,3" opacity={isMyPort ? 0.8 : 0.4}
                 />
                 <line
                   x1={v2.x} y1={v2.y} x2={portX} y2={portY}
-                  stroke="#8B6914" strokeWidth={1.5} strokeDasharray="3,3" opacity={0.5}
+                  stroke={isMyPort ? '#FFD700' : '#8B6914'} strokeWidth={isMyPort ? 2 : 1.5}
+                  strokeDasharray="3,3" opacity={isMyPort ? 0.8 : 0.4}
                 />
                 {/* Port background */}
                 <circle
                   cx={portX} cy={portY} r={16}
-                  fill="#FFF8E1" stroke="#8B6914" strokeWidth={2}
-                  style={{ filter: 'drop-shadow(0 1px 3px rgba(0,0,0,0.3))' }}
+                  fill={isMyPort ? '#FFF3CD' : '#FFF8E1'}
+                  stroke={isMyPort ? '#FFD700' : '#8B6914'}
+                  strokeWidth={isMyPort ? 3 : 2}
+                  style={{ filter: isMyPort ? 'drop-shadow(0 0 6px rgba(255,215,0,0.6))' : 'drop-shadow(0 1px 3px rgba(0,0,0,0.3))' }}
                 />
                 {/* Port icon */}
                 <text
@@ -438,7 +448,8 @@ export default function HexMap() {
                 <text
                   x={portX} y={portY + 8}
                   textAnchor="middle" dominantBaseline="middle"
-                  fontSize={8} fontWeight="bold" fill="#5C3D2E"
+                  fontSize={8} fontWeight="bold"
+                  fill={isMyPort ? '#B8860B' : '#5C3D2E'}
                   className="select-none pointer-events-none"
                 >
                   {rateLabel}
@@ -509,42 +520,52 @@ export default function HexMap() {
             const isCity = settlement.level === 'city';
             const isBouncing = bouncingSettlementIds.has(settlement.vertexId);
 
+            // Draw flag AT the vertex coordinate (corner of tile).
+            // Small radius keeps it away from the tile dice-number badge at (cx, cy+20).
+            const flagR = isCity ? 13 : 12;
+            const fxB = vertex.x;
+            const fyB = vertex.y;
+
             return (
               <g key={settlement.vertexId}>
-                {/* Flag pole */}
-                <line
-                  x1={vertex.x} y1={vertex.y + 2}
-                  x2={vertex.x} y2={vertex.y - 16}
-                  stroke="#5C3D2E" strokeWidth={2.5} strokeLinecap="round"
-                  style={{
-                    opacity: shouldDimTiles && !isBouncing ? 0.3 : 1,
-                    transition: 'opacity 0.3s ease',
-                  }}
-                />
-                {/* Flag circle */}
+                {/* Flag circle at vertex — thick white border + strong drop-shadow */}
                 <circle
-                  cx={vertex.x} cy={vertex.y - 16}
-                  r={isCity ? 14 : 11}
+                  cx={fxB} cy={fyB}
+                  r={flagR}
                   fill={pColor}
-                  stroke={isCity ? '#FFD700' : '#FFF'}
-                  strokeWidth={isCity ? 3 : 2}
+                  stroke="white"
+                  strokeWidth={3}
                   style={{
                     filter: isBouncing
-                      ? 'drop-shadow(0 0 8px rgba(255,215,0,0.8))'
-                      : 'drop-shadow(0 2px 3px rgba(0,0,0,0.4))',
+                      ? 'drop-shadow(0 0 10px rgba(255,215,0,0.95)) drop-shadow(0 2px 4px rgba(0,0,0,0.8))'
+                      : 'drop-shadow(0 0 3px rgba(0,0,0,0.8)) drop-shadow(0 2px 4px rgba(0,0,0,0.6))',
                     opacity: shouldDimTiles && !isBouncing ? 0.3 : 1,
                     transition: 'opacity 0.3s ease',
                   }}
                 >
                   {isBouncing && (
-                    <animate attributeName="r" values={`${isCity ? 14 : 11};${isCity ? 20 : 16};${isCity ? 14 : 11}`} dur="0.5s" repeatCount="1" fill="freeze" />
+                    <animate attributeName="r" values={`${flagR};${flagR + 5};${flagR}`} dur="0.5s" repeatCount="1" fill="freeze" />
                   )}
                 </circle>
+                {/* City: gold ring */}
+                {isCity && (
+                  <circle
+                    cx={fxB} cy={fyB}
+                    r={flagR + 2}
+                    fill="none"
+                    stroke="#FFD700"
+                    strokeWidth={2}
+                    style={{
+                      opacity: shouldDimTiles && !isBouncing ? 0.3 : 1,
+                      transition: 'opacity 0.3s ease',
+                    }}
+                  />
+                )}
                 {/* Flag emoji */}
                 <text
-                  x={vertex.x} y={vertex.y - 15}
+                  x={fxB} y={fyB + 1}
                   textAnchor="middle" dominantBaseline="middle"
-                  fontSize={isBouncing ? (isCity ? 18 : 15) : (isCity ? 14 : 11)}
+                  fontSize={isBouncing ? (isCity ? 16 : 15) : (isCity ? 14 : 13)}
                   className="select-none pointer-events-none"
                   style={{
                     opacity: shouldDimTiles && !isBouncing ? 0.3 : 1,
@@ -553,32 +574,32 @@ export default function HexMap() {
                 >
                   {pFlag}
                 </text>
-                {/* Bounce ring effect */}
-                {isBouncing && (
-                  <circle
-                    cx={vertex.x} cy={vertex.y - 16}
-                    r={isCity ? 14 : 11}
-                    fill="none"
-                    stroke="#FFD700"
-                    strokeWidth={2}
-                  >
-                    <animate attributeName="r" values={`${isCity ? 14 : 11};${isCity ? 26 : 22}`} dur="0.6s" repeatCount="1" fill="freeze" />
-                    <animate attributeName="opacity" values="0.8;0" dur="0.6s" repeatCount="1" fill="freeze" />
-                  </circle>
-                )}
-                {/* City indicator */}
+                {/* City crown badge — offset up-right to not hide flag */}
                 {isCity && (
                   <text
-                    x={vertex.x} y={vertex.y + 6}
+                    x={fxB + flagR} y={fyB - flagR}
                     textAnchor="middle" dominantBaseline="middle"
-                    fontSize={10} className="select-none pointer-events-none"
+                    fontSize={11} className="select-none pointer-events-none"
                     style={{
                       opacity: shouldDimTiles && !isBouncing ? 0.3 : 1,
                       transition: 'opacity 0.3s ease',
                     }}
                   >
-                    🏰
+                    👑
                   </text>
+                )}
+                {/* Bounce ring effect */}
+                {isBouncing && (
+                  <circle
+                    cx={fxB} cy={fyB}
+                    r={flagR}
+                    fill="none"
+                    stroke="#FFD700"
+                    strokeWidth={2}
+                  >
+                    <animate attributeName="r" values={`${flagR};${flagR + 12}`} dur="0.6s" repeatCount="1" fill="freeze" />
+                    <animate attributeName="opacity" values="0.8;0" dur="0.6s" repeatCount="1" fill="freeze" />
+                  </circle>
                 )}
               </g>
             );
