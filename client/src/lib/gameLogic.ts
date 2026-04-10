@@ -2,10 +2,11 @@
 import {
   type GameTile, type Player, type Resources, type ResourceType, type TileType,
   type EventCard, type GameLogEntry, type Difficulty,
-  type Vertex, type Edge, type Settlement, type Road,
+  type Vertex, type Edge, type Settlement, type Road, type Port,
   HEX_LAYOUT, TILE_DISTRIBUTION, DICE_NUMBERS, EVENT_CARDS,
   HEX_LAYOUT_LARGE, TILE_DISTRIBUTION_LARGE, DICE_NUMBERS_LARGE, ROWS_LARGE,
   BUILD_COSTS, VP_VALUES, WINNING_SCORE, PLAYER_COLORS,
+  TRADE_RATE_DEFAULT, TRADE_RATE_GENERAL_PORT, TRADE_RATE_SPECIAL_PORT,
 } from './gameTypes';
 import {
   HEX_SIZE, ROWS, COL_SPACING, ROW_SPACING,
@@ -266,31 +267,6 @@ export function payCost(player: Player, cost: Partial<Resources>): void {
 }
 
 // Check if a vertex is valid for building a settlement
-// BFS shortest path distance between two vertices (edge count)
-function bfsDistance(fromId: string, toId: string, vertices: Vertex[]): number {
-  if (fromId === toId) return 0;
-  const visited = new Set<string>([fromId]);
-  let queue = [fromId];
-  let dist = 0;
-  while (queue.length > 0 && dist < 5) {
-    dist++;
-    const next: string[] = [];
-    for (const vid of queue) {
-      const v = vertices.find(vv => vv.id === vid);
-      if (!v) continue;
-      for (const adjId of v.adjacentVertexIds) {
-        if (adjId === toId) return dist;
-        if (!visited.has(adjId)) {
-          visited.add(adjId);
-          next.push(adjId);
-        }
-      }
-    }
-    queue = next;
-  }
-  return -1; // unreachable within 5 steps
-}
-
 export function canBuildSettlement(
   vertexId: string,
   playerId: string,
@@ -303,28 +279,17 @@ export function canBuildSettlement(
   const vertex = vertices.find(v => v.id === vertexId);
   if (!vertex) return false;
 
-  // Check no settlement already exists on this vertex
+  // Check no settlement already exists on this vertex (any player)
   if (settlements.some(s => s.vertexId === vertexId)) return false;
 
-  // Distance rule: other players' settlements on adjacent vertices block building
-  // Own settlements do NOT block (19-tile board is too small for full Catan distance rule)
+  // Check no opponent settlement on adjacent vertices
   const hasAdjacentOpponentSettlement = vertex.adjacentVertexIds.some(adjVId =>
     settlements.some(s => s.vertexId === adjVId && s.playerId !== playerId)
   );
   if (hasAdjacentOpponentSettlement) return false;
 
-  // During setup phase: no road requirement, but own settlements must be 3+ edges apart
+  // During setup phase: no road requirement
   if (isSetupPhase) {
-    const ownSettlementVertexIds = settlements
-      .filter(s => s.playerId === playerId)
-      .map(s => s.vertexId);
-    if (ownSettlementVertexIds.length > 0) {
-      // BFS from vertexId: check min distance to any own settlement
-      for (const ownVid of ownSettlementVertexIds) {
-        const dist = bfsDistance(vertexId, ownVid, vertices);
-        if (dist >= 0 && dist < 3) return false; // too close
-      }
-    }
     return true;
   }
 
@@ -551,6 +516,89 @@ export function calculateLongestRoad(
 }
 
 // =============================================
+// PORT GENERATION & TRADE RATE
+// =============================================
+
+// Generate ports on the outer edges of the map
+export function generatePorts(vertices: Vertex[], tiles: GameTile[]): Port[] {
+  // Find outer vertices: vertices that have fewer than 3 non-sea adjacent tiles
+  const outerEdgeVertices: string[] = [];
+  vertices.forEach(v => {
+    const nonSeaTiles = v.adjacentTileIds.filter(tid => {
+      const t = tiles.find(tt => tt.id === tid);
+      return t && t.type !== 'sea';
+    });
+    // Outer vertices touch 1-2 non-sea tiles (inner vertices touch 3)
+    if (nonSeaTiles.length > 0 && nonSeaTiles.length < 3) {
+      outerEdgeVertices.push(v.id);
+    }
+  });
+
+  // Find pairs of adjacent outer vertices (these form port edges)
+  const outerPairs: [string, string][] = [];
+  const usedVertices = new Set<string>();
+
+  for (const vId of outerEdgeVertices) {
+    if (usedVertices.has(vId)) continue;
+    const v = vertices.find(vv => vv.id === vId)!;
+    for (const adjId of v.adjacentVertexIds) {
+      if (usedVertices.has(adjId)) continue;
+      if (outerEdgeVertices.includes(adjId)) {
+        outerPairs.push([vId, adjId]);
+        usedVertices.add(vId);
+        usedVertices.add(adjId);
+        break;
+      }
+    }
+  }
+
+  // Shuffle and pick 6 ports
+  const shuffledPairs = shuffle(outerPairs);
+  const portTypes: ('general' | ResourceType)[] = ['general', 'general', 'rubber', 'oil', 'gold', 'food'];
+  const shuffledTypes = shuffle(portTypes);
+
+  const ports: Port[] = [];
+  const count = Math.min(shuffledPairs.length, shuffledTypes.length);
+  for (let i = 0; i < count; i++) {
+    ports.push({
+      id: `port${i}`,
+      vertexIds: [shuffledPairs[i][0], shuffledPairs[i][1]],
+      type: shuffledTypes[i],
+    });
+  }
+
+  return ports;
+}
+
+// Get the trade rate for a given player and resource
+export function getTradeRate(
+  playerId: string,
+  resource: ResourceType,
+  settlements: Settlement[],
+  ports: Port[]
+): number {
+  const playerVertexIds = new Set(
+    settlements.filter(s => s.playerId === playerId).map(s => s.vertexId)
+  );
+
+  let bestRate = TRADE_RATE_DEFAULT;
+
+  for (const port of ports) {
+    const hasSettlementAtPort = port.vertexIds.some(vid => playerVertexIds.has(vid));
+    if (!hasSettlementAtPort) continue;
+
+    if (port.type === resource) {
+      return TRADE_RATE_SPECIAL_PORT; // 2:1 is the best possible
+    }
+    if (port.type === 'general' && bestRate > TRADE_RATE_GENERAL_PORT) {
+      bestRate = TRADE_RATE_GENERAL_PORT;
+    }
+  }
+
+  return bestRate;
+}
+
+// =============================================
 // AI LOGIC
 // =============================================
 
@@ -626,89 +674,132 @@ export function aiTurn(
   edges: Edge[],
   settlements: Settlement[],
   roads: Road[],
-  difficulty: Difficulty
+  difficulty: Difficulty,
+  ports: Port[] = []
 ): AITurnAction[] {
   const actions: AITurnAction[] = [];
-  
-  // Clone player resources for simulation
   const simResources = { ...player.resources };
 
-  const canAffordSim = (cost: Partial<Resources>): boolean => {
-    return (Object.entries(cost) as [ResourceType, number][]).every(
-      ([res, amount]) => simResources[res] >= amount
-    );
-  };
+  const canAffordSim = (cost: Partial<Resources>): boolean =>
+    (Object.entries(cost) as [ResourceType, number][]).every(([res, amt]) => simResources[res] >= amt);
 
-  const payCostSim = (cost: Partial<Resources>): void => {
-    (Object.entries(cost) as [ResourceType, number][]).forEach(([res, amount]) => {
-      simResources[res] -= amount;
-    });
-  };
+  const payCostSim = (cost: Partial<Resources>): void =>
+    (Object.entries(cost) as [ResourceType, number][]).forEach(([res, amt]) => { simResources[res] -= amt; });
 
-  // Priority: Build settlement > Build road > Upgrade to city
-  // Try to build settlement
-  if (canAffordSim(BUILD_COSTS.settlement)) {
+  // Max actions per turn: easy=1, normal=2, hard=unlimited
+  const maxActions = difficulty === 'easy' ? 1 : difficulty === 'normal' ? 2 : 99;
+
+  // --- Helpers ---
+  const tryBuildSettlement = (): boolean => {
+    if (actions.length >= maxActions) return false;
+    if (!canAffordSim(BUILD_COSTS.settlement)) return false;
     const validVertices = getValidSettlementVertices(player.id, vertices, settlements, roads, false, difficulty);
-    if (validVertices.length > 0) {
-      let chosen: string;
-      if (difficulty === 'easy') {
-        // Pure random
-        chosen = validVertices[Math.floor(Math.random() * validVertices.length)];
-      } else {
-        // Score vertices
-        const scored = validVertices.map(vId => {
-          const vertex = vertices.find(v => v.id === vId)!;
-          let score = 0;
-          vertex.adjacentTileIds.forEach(tileId => {
-            const tile = tiles.find(t => t.id === tileId);
-            if (!tile || tile.type === 'sea' || tile.type === 'desert') return;
-            const prob = tile.diceNumber <= 6 ? tile.diceNumber - 1 : 13 - tile.diceNumber;
-            score += prob;
-          });
-          return { vId, score };
-        });
-        scored.sort((a, b) => b.score - a.score);
-        if (difficulty === 'normal') {
-          const topHalf = scored.slice(0, Math.max(1, Math.ceil(scored.length / 2)));
-          chosen = topHalf[Math.floor(Math.random() * topHalf.length)].vId;
-        } else {
-          // Hard: best vertex
-          chosen = scored[0].vId;
-        }
-      }
-      actions.push({ type: 'build_settlement', vertexId: chosen });
-      payCostSim(BUILD_COSTS.settlement);
+    if (validVertices.length === 0) return false;
+    let chosen: string;
+    if (difficulty === 'easy') {
+      chosen = validVertices[Math.floor(Math.random() * validVertices.length)];
+    } else if (difficulty === 'normal') {
+      const scored = scoreVertices(validVertices, vertices, tiles);
+      const topHalf = scored.slice(0, Math.max(1, Math.ceil(scored.length / 2)));
+      chosen = topHalf[Math.floor(Math.random() * topHalf.length)].vId;
+    } else {
+      const scored = scoreVertices(validVertices, vertices, tiles);
+      chosen = scored[0].vId;
     }
-  }
+    actions.push({ type: 'build_settlement', vertexId: chosen });
+    payCostSim(BUILD_COSTS.settlement);
+    return true;
+  };
 
-  // Try to build road
-  if (canAffordSim(BUILD_COSTS.road)) {
+  const tryBuildRoad = (): boolean => {
+    if (actions.length >= maxActions) return false;
+    if (!canAffordSim(BUILD_COSTS.road)) return false;
     const validEdges = getValidRoadEdges(player.id, edges, vertices, settlements, roads, false);
-    if (validEdges.length > 0) {
-      const chosen = validEdges[Math.floor(Math.random() * validEdges.length)];
-      actions.push({ type: 'build_road', edgeId: chosen });
-      payCostSim(BUILD_COSTS.road);
-    }
-  }
+    if (validEdges.length === 0) return false;
+    const chosen = validEdges[Math.floor(Math.random() * validEdges.length)];
+    actions.push({ type: 'build_road', edgeId: chosen });
+    payCostSim(BUILD_COSTS.road);
+    return true;
+  };
 
-  // Try to upgrade to city
-  if (canAffordSim(BUILD_COSTS.city)) {
+  const tryUpgradeCity = (): boolean => {
+    if (actions.length >= maxActions) return false;
+    if (!canAffordSim(BUILD_COSTS.city)) return false;
     const upgradeable = getUpgradeableVertices(player.id, settlements);
-    if (upgradeable.length > 0) {
-      const chosen = upgradeable[Math.floor(Math.random() * upgradeable.length)];
-      actions.push({ type: 'upgrade_city', vertexId: chosen });
-      payCostSim(BUILD_COSTS.city);
-    }
-  }
+    if (upgradeable.length === 0) return false;
+    const chosen = upgradeable[Math.floor(Math.random() * upgradeable.length)];
+    actions.push({ type: 'upgrade_city', vertexId: chosen });
+    payCostSim(BUILD_COSTS.city);
+    return true;
+  };
 
-  // Trade if we have excess resources (4:1)
-  if (difficulty !== 'easy' && actions.length === 0) {
-    const resources: ResourceType[] = ['rubber', 'oil', 'gold', 'food'];
-    const excess = resources.find(r => simResources[r] >= 4);
-    const needed = resources.find(r => simResources[r] === 0);
-    if (excess && needed) {
-      actions.push({ type: 'trade', tradeFrom: excess, tradeTo: needed });
+  const tryTrade = (): boolean => {
+    if (actions.length >= maxActions) return false;
+    const allRes: ResourceType[] = ['rubber', 'oil', 'gold', 'food'];
+    const needed = allRes.find(r => simResources[r] === 0);
+    if (!needed) return false;
+    // Find excess resource considering port trade rates
+    const excess = allRes.find(r => {
+      const rate = getTradeRate(player.id, r, settlements, ports);
+      const threshold = difficulty === 'hard' ? rate : rate + 1;
+      return simResources[r] >= threshold;
+    });
+    if (!excess) return false;
+    const rate = getTradeRate(player.id, excess, settlements, ports);
+    simResources[excess] -= rate;
+    simResources[needed] += 1;
+    actions.push({ type: 'trade', tradeFrom: excess, tradeTo: needed });
+    return true;
+  };
+
+  const playerSettlementCount = settlements.filter(s => s.playerId === player.id && s.level === 'settlement').length;
+
+  // =============================================
+  // EASY: simple — settlement or road only, 1 action max
+  // =============================================
+  if (difficulty === 'easy') {
+    if (!tryBuildSettlement()) {
+      tryBuildRoad();
     }
+
+  // =============================================
+  // NORMAL: balanced — up to 2 actions, trade on excess 5+
+  // =============================================
+  } else if (difficulty === 'normal') {
+    if (playerSettlementCount >= 2) {
+      if (!tryUpgradeCity()) tryBuildSettlement();
+    } else {
+      tryBuildSettlement();
+    }
+    tryBuildRoad();
+    if (actions.length === 0) tryTrade();
+
+  // =============================================
+  // HARD: aggressive — unlimited actions, proactive trading
+  // =============================================
+  } else {
+    // Trade first if it enables a build
+    if (!canAffordSim(BUILD_COSTS.city) && !canAffordSim(BUILD_COSTS.settlement)) {
+      tryTrade();
+    }
+    // Build loop: keep building until out of resources or options
+    if (playerSettlementCount >= 3) {
+      tryUpgradeCity();
+      tryBuildRoad();
+      tryBuildSettlement();
+      tryUpgradeCity(); // try again after road
+    } else if (playerSettlementCount >= 2) {
+      if (!tryUpgradeCity()) tryBuildSettlement();
+      tryBuildRoad();
+      tryBuildSettlement();
+    } else {
+      tryBuildSettlement();
+      tryBuildRoad();
+      tryBuildSettlement();
+      tryUpgradeCity();
+    }
+    // Trade leftover excess
+    if (actions.length === 0) tryTrade();
   }
 
   if (actions.length === 0) {
@@ -716,6 +807,27 @@ export function aiTurn(
   }
 
   return actions;
+}
+
+// Score vertices by adjacent tile dice probability
+function scoreVertices(
+  validVertices: string[],
+  vertices: Vertex[],
+  tiles: GameTile[]
+): { vId: string; score: number }[] {
+  const scored = validVertices.map(vId => {
+    const vertex = vertices.find(v => v.id === vId)!;
+    let score = 0;
+    vertex.adjacentTileIds.forEach(tileId => {
+      const tile = tiles.find(t => t.id === tileId);
+      if (!tile || tile.type === 'sea' || tile.type === 'desert') return;
+      const prob = tile.diceNumber <= 6 ? tile.diceNumber - 1 : 13 - tile.diceNumber;
+      score += prob;
+    });
+    return { vId, score };
+  });
+  scored.sort((a, b) => b.score - a.score);
+  return scored;
 }
 
 // =============================================

@@ -7,7 +7,7 @@
  */
 import { useGameStore } from '@/lib/gameStore';
 import { BUILD_COSTS, RESOURCE_INFO, type ResourceType } from '@/lib/gameTypes';
-import { canAfford, getUpgradeableVertices, getValidSettlementVertices, getValidRoadEdges } from '@/lib/gameLogic';
+import { canAfford, getUpgradeableVertices, getValidSettlementVertices, getValidRoadEdges, getTradeRate } from '@/lib/gameLogic';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useState } from 'react';
 import { Hammer, ArrowRightLeft, SkipForward, X, Check } from 'lucide-react';
@@ -170,7 +170,7 @@ export default function ActionMenu() {
             className="parchment rounded-xl p-3 mb-2"
           >
             <h3 className="font-heading font-bold text-amber-900 text-center mb-2">
-              交換する（3つ → 1つ）
+              交換する（資源 → 1つ）
             </h3>
             <TradePanel onClose={() => setShowTrade(false)} />
           </motion.div>
@@ -270,35 +270,48 @@ function BuildOption({ label, cost, points, enabled, disabledReason, description
 }
 
 function TradePanel({ onClose }: { onClose: () => void }) {
-  const { players, currentPlayerIndex, doTrade } = useGameStore();
+  const { players, currentPlayerIndex, doTrade, settlements, ports } = useGameStore();
   const player = players[currentPlayerIndex];
   const resources: ResourceType[] = ['rubber', 'oil', 'gold', 'food'];
   const [giveRes, setGiveRes] = useState<ResourceType | null>(null);
 
   if (!player) return null;
 
+  // Calculate trade rates for each resource
+  const tradeRates: Record<ResourceType, number> = {} as Record<ResourceType, number>;
+  resources.forEach(res => {
+    tradeRates[res] = getTradeRate(player.id, res, settlements, ports);
+  });
+
   if (!giveRes) {
     return (
       <div>
         <p className="text-amber-800 text-sm text-center mb-2">
-          どの資源を3つ出す？
+          どの資源を出す？
         </p>
         <div className="grid grid-cols-2 gap-2">
           {resources.map(res => {
             const info = RESOURCE_INFO[res];
-            const hasEnough = player.resources[res] >= 3;
+            const rate = tradeRates[res];
+            const hasEnough = player.resources[res] >= rate;
+            const isDiscounted = rate < 4;
             return (
               <button
                 key={res}
                 disabled={!hasEnough}
                 onClick={() => setGiveRes(res)}
-                className={`p-2 rounded-lg font-heading font-bold text-sm ${
+                className={`p-2 rounded-lg font-heading font-bold text-sm relative ${
                   hasEnough
-                    ? 'bg-white border-2 border-amber-400 text-amber-900 active:scale-95'
+                    ? isDiscounted
+                      ? 'bg-amber-50 border-2 border-yellow-500 text-amber-900 active:scale-95 ring-1 ring-yellow-300'
+                      : 'bg-white border-2 border-amber-400 text-amber-900 active:scale-95'
                     : 'bg-gray-100 border-2 border-gray-300 text-gray-400'
                 }`}
               >
                 {info.icon} {info.name} ({player.resources[res]})
+                <span className={`block text-xs mt-0.5 ${isDiscounted ? 'text-yellow-600 font-bold' : 'text-amber-600'}`}>
+                  {isDiscounted ? `⚓${rate}:1` : `${rate}:1`}
+                </span>
               </button>
             );
           })}
@@ -313,10 +326,13 @@ function TradePanel({ onClose }: { onClose: () => void }) {
     );
   }
 
+  const giveRate = tradeRates[giveRes];
+
   return (
     <div>
       <p className="text-amber-800 text-sm text-center mb-2">
-        {RESOURCE_INFO[giveRes].icon} {RESOURCE_INFO[giveRes].name}3つで何がほしい？
+        {RESOURCE_INFO[giveRes].icon} {RESOURCE_INFO[giveRes].name}{giveRate}つで何がほしい？
+        {giveRate < 4 && <span className="text-yellow-600 font-bold"> ⚓港で割引！</span>}
       </p>
       <div className="grid grid-cols-2 gap-2">
         {resources.filter(r => r !== giveRes).map(res => {

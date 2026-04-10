@@ -5,16 +5,17 @@
  * - 六角形タイルの辺に道を表示
  * - タップで建設位置を選択
  * - サイコロ出目時に該当タイルをハイライト
+ * - diceAnimationStep による段階的演出
  */
 import { useGameStore } from '@/lib/gameStore';
-import { TILE_INFO, RESOURCE_INFO, type ResourceType, type TileType, type GameTile, type EventCard } from '@/lib/gameTypes';
+import { TILE_INFO, RESOURCE_INFO, type ResourceType, type TileType, type GameTile, type EventCard, type Port } from '@/lib/gameTypes';
 import { getValidSettlementVertices, getValidRoadEdges } from '@/lib/gameLogic';
 import {
   HEX_SIZE,
   getTileCenter, getHexPoints, getSvgDimensions,
 } from '@/lib/hexGeometry';
 import { motion, AnimatePresence } from 'framer-motion';
-import { useRef } from 'react';
+import { useRef, useMemo } from 'react';
 
 // --- Dice Result Zoom ---
 function DiceResultZoom({ diceTotal, players, resourceGains, playerColors, playerFlags, onClose, pendingEvent }: {
@@ -131,11 +132,12 @@ function DiceResultZoom({ diceTotal, players, resourceGains, playerColors, playe
 }
 
 // --- Single Hex Tile ---
-function HexTile({ tile, cx, cy, isHighlighted }: {
+function HexTile({ tile, cx, cy, isHighlighted, isDimmed }: {
   tile: GameTile;
   cx: number;
   cy: number;
   isHighlighted: boolean;
+  isDimmed: boolean;
 }) {
   const resInfo = tile.type !== 'sea' && tile.type !== 'desert' ? RESOURCE_INFO[tile.type as ResourceType] : null;
 
@@ -152,7 +154,15 @@ function HexTile({ tile, cx, cy, isHighlighted }: {
   const [c1, c2] = getGradient(tile.type);
 
   return (
-    <g style={{ filter: isHighlighted ? 'drop-shadow(0 0 16px rgba(255, 215, 0, 1))' : 'drop-shadow(0 3px 4px rgba(0,0,0,0.35))' }}>
+    <g
+      style={{
+        filter: isHighlighted
+          ? 'drop-shadow(0 0 16px rgba(255, 215, 0, 1))'
+          : 'drop-shadow(0 3px 4px rgba(0,0,0,0.35))',
+        opacity: isDimmed ? 0.3 : 1,
+        transition: 'opacity 0.3s ease',
+      }}
+    >
       <defs>
         <linearGradient id={`grad-${tile.id}`} x1="0%" y1="0%" x2="100%" y2="100%">
           <stop offset="0%" stopColor={c1} />
@@ -234,11 +244,12 @@ function HexTile({ tile, cx, cy, isHighlighted }: {
 // --- Main HexMap Component ---
 export default function HexMap() {
   const {
-    tiles, players, vertices, edges, settlements, roads,
+    tiles, players, vertices, edges, settlements, roads, ports,
     currentPlayerIndex, highlightedTileIds, highlightedVertexIds, highlightedEdgeIds,
     buildMode, selectedVertexId, selectedEdgeId, selectVertex, selectEdge,
     phase, diceResult, showResourceGains, dismissResourceGains, isPlayingAI,
     pendingEvent, setupPhase, resourceGains, mapRows,
+    diceAnimationStep,
   } = useGameStore();
 
   const currentPlayer = players[currentPlayerIndex];
@@ -254,7 +265,36 @@ export default function HexMap() {
   });
 
   const diceTotal = diceResult ? diceResult[0] + diceResult[1] : 0;
-  const shouldShowDiceZoom = phase === 'action' && diceResult && showResourceGains && !isPlayingAI;
+  const shouldShowDiceZoom = phase === 'action' && diceResult && showResourceGains && !isPlayingAI && diceAnimationStep >= 4;
+
+  // Strict phase-based highlight guard:
+  // - Human: only during phase==='action' AND diceAnimationStep >= 2
+  // - AI: only during phase==='ai_turn' when highlightedTileIds is set
+  // - NEVER during phase==='rolling' or any other phase
+  const canHighlight =
+    (phase === 'action' && !isPlayingAI && diceAnimationStep >= 2) ||
+    (phase === 'ai_turn' && isPlayingAI);
+  const effectiveHighlightIds = canHighlight ? highlightedTileIds : [];
+
+  // Flag bounce: only during human step 3+ (never AI)
+  const bouncingSettlementIds = useMemo(() => {
+    if (phase !== 'action' || isPlayingAI || diceAnimationStep < 3 || highlightedTileIds.length === 0) {
+      return new Set<string>();
+    }
+    const highlightedSet = new Set(highlightedTileIds);
+    const ids = new Set<string>();
+    settlements.forEach(s => {
+      const vertex = vertices.find(v => v.id === s.vertexId);
+      if (!vertex) return;
+      if (vertex.adjacentTileIds.some(tid => highlightedSet.has(tid))) {
+        ids.add(s.vertexId);
+      }
+    });
+    return ids;
+  }, [phase, diceAnimationStep, highlightedTileIds, settlements, vertices, isPlayingAI]);
+
+  // Dim non-highlighted tiles only when highlights are active
+  const shouldDimTiles = effectiveHighlightIds.length > 0;
 
   // Handle vertex click
   const handleVertexClick = (vertexId: string) => {
@@ -312,9 +352,9 @@ export default function HexMap() {
           </span>
           {phase === 'setup' && setupPhase
             ? setupPhase.step === 'place_settlement'
-              ? `${players[setupPhase.currentPlayerIndex]?.flagEmoji} 拠点を配置する頂点をタップ！`
+              ? `${players[setupPhase.currentPlayerIndex]?.flagEmoji} 拠点��配置する頂点をタップ！`
               : `${players[setupPhase.currentPlayerIndex]?.flagEmoji} 道を配置する辺をタップ！`
-            : buildMode === 'settlement' ? '拠点を建てる頂点をタップ！'
+            : buildMode === 'settlement' ? '拠点��建てる頂点をタップ！'
             : buildMode === 'city' ? 'アップグレードする拠点をタップ！'
             : '道を建てる辺をタップ！'
           }
@@ -322,8 +362,6 @@ export default function HexMap() {
       )}
 
       {/* Map Container */}
-      {/* Mobile: scrollable with max-height cap */}
-      {/* PC: flex-1 fills remaining space, SVG scales to fit via preserveAspectRatio */}
       <div
         ref={mapRef}
         className="w-full max-h-[55vh] overflow-auto md:max-h-none md:overflow-visible md:flex-1 md:min-h-0"
@@ -333,10 +371,11 @@ export default function HexMap() {
           preserveAspectRatio="xMidYMid meet"
           className="drop-shadow-lg w-full h-auto min-w-[360px] min-h-[300px] md:min-w-0 md:min-h-0 md:h-full md:w-full"
         >
-          {/* Layer 1: Hex Tiles - using shared getTileCenter */}
+          {/* Layer 1: Hex Tiles */}
           {tiles.map((tile, tileIdx) => {
             const center = getTileCenter(tileIdx, mapRows);
-            const isHighlighted = highlightedTileIds.includes(tile.id);
+            const isHighlighted = effectiveHighlightIds.includes(tile.id);
+            const isDimmed = shouldDimTiles && !isHighlighted;
             return (
               <HexTile
                 key={tile.id}
@@ -344,7 +383,67 @@ export default function HexMap() {
                 cx={center.x}
                 cy={center.y}
                 isHighlighted={isHighlighted}
+                isDimmed={isDimmed}
               />
+            );
+          })}
+
+          {/* Layer 1.5: Ports (港) */}
+          {ports.map((port: Port) => {
+            const v1 = vertices.find(v => v.id === port.vertexIds[0]);
+            const v2 = vertices.find(v => v.id === port.vertexIds[1]);
+            if (!v1 || !v2) return null;
+
+            // Position: midpoint of the two port vertices, shifted outward from map center
+            const midX = (v1.x + v2.x) / 2;
+            const midY = (v1.y + v2.y) / 2;
+            const centerX = svgW / 2;
+            const centerY = svgH / 2;
+            const dx = midX - centerX;
+            const dy = midY - centerY;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            const offsetDist = 18;
+            const portX = midX + (dx / dist) * offsetDist;
+            const portY = midY + (dy / dist) * offsetDist;
+
+            const rateLabel = port.type === 'general' ? '3:1' : '2:1';
+            const portIcon = port.type === 'general' ? '⚓' : RESOURCE_INFO[port.type as ResourceType].icon;
+
+            return (
+              <g key={port.id}>
+                {/* Connection lines to vertices */}
+                <line
+                  x1={v1.x} y1={v1.y} x2={portX} y2={portY}
+                  stroke="#8B6914" strokeWidth={1.5} strokeDasharray="3,3" opacity={0.5}
+                />
+                <line
+                  x1={v2.x} y1={v2.y} x2={portX} y2={portY}
+                  stroke="#8B6914" strokeWidth={1.5} strokeDasharray="3,3" opacity={0.5}
+                />
+                {/* Port background */}
+                <circle
+                  cx={portX} cy={portY} r={16}
+                  fill="#FFF8E1" stroke="#8B6914" strokeWidth={2}
+                  style={{ filter: 'drop-shadow(0 1px 3px rgba(0,0,0,0.3))' }}
+                />
+                {/* Port icon */}
+                <text
+                  x={portX} y={portY - 4}
+                  textAnchor="middle" dominantBaseline="middle"
+                  fontSize={12} className="select-none pointer-events-none"
+                >
+                  {portIcon}
+                </text>
+                {/* Rate label */}
+                <text
+                  x={portX} y={portY + 8}
+                  textAnchor="middle" dominantBaseline="middle"
+                  fontSize={8} fontWeight="bold" fill="#5C3D2E"
+                  className="select-none pointer-events-none"
+                >
+                  {rateLabel}
+                </text>
+              </g>
             );
           })}
 
@@ -361,7 +460,11 @@ export default function HexMap() {
                 stroke={color}
                 strokeWidth={5}
                 strokeLinecap="round"
-                style={{ filter: 'drop-shadow(0 1px 2px rgba(0,0,0,0.5))' }}
+                style={{
+                  filter: 'drop-shadow(0 1px 2px rgba(0,0,0,0.5))',
+                  opacity: shouldDimTiles ? 0.4 : 1,
+                  transition: 'opacity 0.3s ease',
+                }}
               />
             );
           })}
@@ -404,6 +507,7 @@ export default function HexMap() {
             const pColor = playerColors[settlement.playerId] || '#888';
             const pFlag = playerFlags[settlement.playerId] || '🏳️';
             const isCity = settlement.level === 'city';
+            const isBouncing = bouncingSettlementIds.has(settlement.vertexId);
 
             return (
               <g key={settlement.vertexId}>
@@ -412,6 +516,10 @@ export default function HexMap() {
                   x1={vertex.x} y1={vertex.y + 2}
                   x2={vertex.x} y2={vertex.y - 16}
                   stroke="#5C3D2E" strokeWidth={2.5} strokeLinecap="round"
+                  style={{
+                    opacity: shouldDimTiles && !isBouncing ? 0.3 : 1,
+                    transition: 'opacity 0.3s ease',
+                  }}
                 />
                 {/* Flag circle */}
                 <circle
@@ -420,23 +528,54 @@ export default function HexMap() {
                   fill={pColor}
                   stroke={isCity ? '#FFD700' : '#FFF'}
                   strokeWidth={isCity ? 3 : 2}
-                  style={{ filter: 'drop-shadow(0 2px 3px rgba(0,0,0,0.4))' }}
-                />
+                  style={{
+                    filter: isBouncing
+                      ? 'drop-shadow(0 0 8px rgba(255,215,0,0.8))'
+                      : 'drop-shadow(0 2px 3px rgba(0,0,0,0.4))',
+                    opacity: shouldDimTiles && !isBouncing ? 0.3 : 1,
+                    transition: 'opacity 0.3s ease',
+                  }}
+                >
+                  {isBouncing && (
+                    <animate attributeName="r" values={`${isCity ? 14 : 11};${isCity ? 20 : 16};${isCity ? 14 : 11}`} dur="0.5s" repeatCount="1" fill="freeze" />
+                  )}
+                </circle>
                 {/* Flag emoji */}
                 <text
                   x={vertex.x} y={vertex.y - 15}
                   textAnchor="middle" dominantBaseline="middle"
-                  fontSize={isCity ? 14 : 11}
+                  fontSize={isBouncing ? (isCity ? 18 : 15) : (isCity ? 14 : 11)}
                   className="select-none pointer-events-none"
+                  style={{
+                    opacity: shouldDimTiles && !isBouncing ? 0.3 : 1,
+                    transition: 'opacity 0.3s ease, font-size 0.3s ease',
+                  }}
                 >
                   {pFlag}
                 </text>
+                {/* Bounce ring effect */}
+                {isBouncing && (
+                  <circle
+                    cx={vertex.x} cy={vertex.y - 16}
+                    r={isCity ? 14 : 11}
+                    fill="none"
+                    stroke="#FFD700"
+                    strokeWidth={2}
+                  >
+                    <animate attributeName="r" values={`${isCity ? 14 : 11};${isCity ? 26 : 22}`} dur="0.6s" repeatCount="1" fill="freeze" />
+                    <animate attributeName="opacity" values="0.8;0" dur="0.6s" repeatCount="1" fill="freeze" />
+                  </circle>
+                )}
                 {/* City indicator */}
                 {isCity && (
                   <text
                     x={vertex.x} y={vertex.y + 6}
                     textAnchor="middle" dominantBaseline="middle"
                     fontSize={10} className="select-none pointer-events-none"
+                    style={{
+                      opacity: shouldDimTiles && !isBouncing ? 0.3 : 1,
+                      transition: 'opacity 0.3s ease',
+                    }}
                   >
                     🏰
                   </text>

@@ -129,6 +129,7 @@ export interface GameState {
   edges: Edge[];
   settlements: Settlement[];
   roads: Road[];
+  ports: Port[];
   currentPlayerIndex: number;
   currentTurn: number;
   maxTurns: number;
@@ -166,6 +167,17 @@ export const PLAYER_COLORS = [
   { color: '#9B59B6', name: '紫', flagEmoji: '🇺🇸', countryName: 'アメリカ' },
   { color: '#1ABC9C', name: '水色', flagEmoji: '🇮🇹', countryName: 'イタリア' },
 ];
+
+// --- Port (港) ---
+export interface Port {
+  id: string;
+  vertexIds: string[];  // この港に隣接する頂点（2つ）
+  type: 'general' | ResourceType;  // general=3:1、資源港=2:1
+}
+
+export const TRADE_RATE_DEFAULT = 4;
+export const TRADE_RATE_GENERAL_PORT = 3;
+export const TRADE_RATE_SPECIAL_PORT = 2;
 
 // --- Build Costs ---
 export const BUILD_COSTS = {

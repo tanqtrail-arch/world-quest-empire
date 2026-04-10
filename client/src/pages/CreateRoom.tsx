@@ -70,9 +70,9 @@ export default function CreateRoom() {
   };
 
   const difficultyOptions: { value: Difficulty; label: string; desc: string; color: string }[] = [
-    { value: 'easy', label: 'かんたん', desc: 'イベント少なめ', color: '#2ECC71' },
-    { value: 'normal', label: 'ふつう', desc: '標準ルール', color: '#3498DB' },
-    { value: 'hard', label: 'むずかしい', desc: 'イベント多め', color: '#E74C3C' },
+    { value: 'easy', label: 'よわい', desc: 'のんびりプレイ。はじめてでも安心！', color: '#2ECC71' },
+    { value: 'normal', label: 'ふつう', desc: 'バランスの良い対戦。おすすめ！', color: '#3498DB' },
+    { value: 'hard', label: 'つよい', desc: '本気モード。勝てるかな？', color: '#E74C3C' },
   ];
 
   const usedCountries = new Set(slots.map(s => s.countryIndex));
@@ -239,6 +239,15 @@ export default function CreateRoom() {
               </button>
             ))}
           </div>
+        </div>
+
+        {/* Rules hint */}
+        <div className="mb-4 parchment rounded-xl p-3 bg-amber-50/50">
+          <h3 className="font-heading font-bold text-amber-800 text-sm mb-1">⚓ 港（みなと）</h3>
+          <p className="text-xs text-amber-700">
+            マップの外側に港があるよ。港に隣接する頂点に拠点を建てると、交換レートがお得に！
+            通常4:1 → 一般港3:1、資源港ならその資源のみ2:1で交換できる！
+          </p>
         </div>
 
         {/* Start Button */}
