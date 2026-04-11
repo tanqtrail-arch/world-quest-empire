@@ -524,11 +524,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
     const dice = rollDice();
     const total = dice[0] + dice[1];
     const currentPlayer = state.players[state.currentPlayerIndex];
-
-    // Track 7-rolls by human players (badge: lucky 7)
-    if (total === 7 && !currentPlayer.isAI) {
-      set({ sevensRolledCount: state.sevensRolledCount + 1 });
-    }
+    const isHumanSeven = total === 7 && !currentPlayer.isAI;
 
     const logs: GameLogEntry[] = [
       generateGameLog(`${currentPlayer.name}がサイコロを振った！ 🎲 ${dice[0]} + ${dice[1]} = ${total}`, 'info', currentPlayer.id),
@@ -598,6 +594,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
       showResourceGains: false,
       resourceGains: resourceGainPopups,
       players: newPlayers,
+      ...(isHumanSeven ? { sevensRolledCount: state.sevensRolledCount + 1 } : {}),
     });
 
     if (total === 7) {
@@ -696,19 +693,14 @@ export const useGameStore = create<GameStore>((set, get) => ({
   dismissResourceGains: () => {
     const state = get();
     const diceTotal = state.diceResult ? state.diceResult[0] + state.diceResult[1] : 0;
-    console.log('[dismissResourceGains] diceTotal=', diceTotal, 'quizDifficulty=', state.quizDifficulty);
 
     if (diceTotal === 7) {
-      // 7が出た → クイズ出題
       const quizPool = QUIZ_QUESTIONS.filter(q => q.difficulty === state.quizDifficulty);
-      console.log('[dismissResourceGains] quizPool size=', quizPool.length);
       if (quizPool.length === 0) {
-        console.error('[dismissResourceGains] NO QUIZ QUESTIONS for difficulty:', state.quizDifficulty);
         set({ showResourceGains: false, highlightedTileIds: [], diceAnimationStep: 0 as 0 | 1 | 2 | 3 | 4 });
         return;
       }
       const quiz = quizPool[Math.floor(Math.random() * quizPool.length)];
-      console.log('[dismissResourceGains] selected quiz:', quiz.id, quiz.question);
 
       set({
         showResourceGains: false,
@@ -721,7 +713,6 @@ export const useGameStore = create<GameStore>((set, get) => ({
         turnTimerPausedForQuiz: true,
         quizTotalCount: state.quizTotalCount + 1,
       });
-      console.log('[dismissResourceGains] phase set to quiz, currentQuiz set');
     } else {
       set({
         showResourceGains: false,
@@ -742,8 +733,6 @@ export const useGameStore = create<GameStore>((set, get) => ({
       const validVertices = getValidSettlementVertices(
         player.id, state.vertices, state.settlements, state.roads, false, state.difficulty
       );
-      const playerRoads = state.roads.filter(r => r.playerId === player.id);
-      console.log(`[startBuild] settlement: ${validVertices.length} valid, roads=${playerRoads.length}, difficulty=${state.difficulty}`);
       set({
         buildMode: 'settlement',
         highlightedVertexIds: validVertices,
@@ -757,7 +746,6 @@ export const useGameStore = create<GameStore>((set, get) => ({
       const validEdges = getValidRoadEdges(
         player.id, state.edges, state.vertices, state.settlements, state.roads, false
       );
-      console.log(`[startBuild] road: ${validEdges.length} valid edges, resources:`, player.resources);
       set({
         buildMode: 'road',
         highlightedEdgeIds: validEdges,
@@ -769,7 +757,6 @@ export const useGameStore = create<GameStore>((set, get) => ({
       });
     } else if (type === 'city') {
       const upgradeableVertices = getUpgradeableVertices(player.id, state.settlements);
-      console.log(`[startBuild] city: ${upgradeableVertices.length} upgradeable, resources:`, player.resources);
       set({
         buildMode: 'city',
         highlightedVertexIds: upgradeableVertices,
@@ -1233,12 +1220,13 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
     // Track "came from behind" badge: if any human ends a turn in last place,
     // flag it so we can award the badge if they eventually win.
+    let wasLastPlaceOnceUpdate: boolean | null = null;
     const humanPlayers = state.players.filter(p => p.isHuman);
     if (humanPlayers.length > 0 && !state.wasLastPlaceOnce) {
       const minVP = Math.min(...state.players.map(p => p.victoryPoints));
       const anyHumanLast = humanPlayers.some(p => p.victoryPoints === minVP);
       if (anyHumanLast) {
-        set({ wasLastPlaceOnce: true });
+        wasLastPlaceOnceUpdate = true;
       }
     }
 
@@ -1255,6 +1243,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
           screen: 'result',
           currentTurn: turn,
           gameLog: [...state.gameLog, generateGameLog(`${winner.name}の勝利！`, 'system')],
+          ...(wasLastPlaceOnceUpdate !== null ? { wasLastPlaceOnce: true } : {}),
         });
         return;
       }
@@ -1318,7 +1307,6 @@ export const useGameStore = create<GameStore>((set, get) => ({
             p.resources.oil += 1;
             p.resources.gold += 1;
             p.resources.food += 1;
-            console.log(`[Lucky7] ${p.name} (${p.isAI ? 'AI' : 'Human'}) +1全資源 → rubber:${p.resources.rubber} oil:${p.resources.oil} gold:${p.resources.gold} food:${p.resources.food}`);
           });
           // Build a per-player summary like "🇯🇵 🌿+1 🛢️+1 💰+1 🌾+1"
           simPlayers.forEach(p => {
@@ -1552,12 +1540,10 @@ export const useGameStore = create<GameStore>((set, get) => ({
             if (a.tradeFrom && a.tradeTo) {
               const tradeRate = getTradeRate(aiP.id, a.tradeFrom, simSettlements, state.ports);
               if (aiP.resources[a.tradeFrom] < tradeRate) {
-                console.log(`[AI Skip] ${aiP.name} cannot afford trade ${a.tradeFrom}x${tradeRate}. has:${aiP.resources[a.tradeFrom]}`);
                 return;
               }
               aiP.resources[a.tradeFrom] -= tradeRate;
               aiP.resources[a.tradeTo] += 1;
-              console.log(`[AI Trade] ${aiP.name} ${a.tradeFrom}-${tradeRate} → ${a.tradeTo}+1, resources:`, { ...aiP.resources });
               const fromInfo = RESOURCE_INFO[a.tradeFrom];
               const toInfo = RESOURCE_INFO[a.tradeTo];
               logs.push(generateGameLog(`${aiP.flagEmoji} ${aiP.name}が${fromInfo.icon}${fromInfo.name}×${tradeRate}→${toInfo.icon}${toInfo.name}×1に交換`, 'trade', aiP.id));
@@ -1585,7 +1571,6 @@ export const useGameStore = create<GameStore>((set, get) => ({
           const canAfford = (Object.entries(cost) as [ResourceType, number][])
             .every(([res, amt]) => aiP.resources[res] >= amt);
           if (!canAfford) {
-            console.log(`[AI Skip] ${aiP.name} cannot afford ${a.type}. resources:`, { ...aiP.resources }, 'cost:', cost);
             return;
           }
 
@@ -1597,7 +1582,6 @@ export const useGameStore = create<GameStore>((set, get) => ({
           (Object.entries(cost) as [ResourceType, number][]).forEach(([res, amt]) => {
             aiP.resources[res] -= amt;
           });
-          console.log(`[AI Build] ${aiP.name} ${a.type} → resources:`, { ...aiP.resources });
 
           // Update sim board state
           if (a.type === 'build_settlement' && a.vertexId) {
@@ -1682,6 +1666,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
         _finalSimPlayers: simPlayers,
         _finalSimSettlements: simSettlements,
         _finalSimRoads: simRoads,
+        ...(wasLastPlaceOnceUpdate !== null ? { wasLastPlaceOnce: true } : {}),
       } as any);
 
     } else {
@@ -1713,6 +1698,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
         turnTimerActive: !needHandoff,
         turnTimerPausedForQuiz: false,
         usedGoldDice: false,
+        ...(wasLastPlaceOnceUpdate !== null ? { wasLastPlaceOnce: true } : {}),
       });
     }
   },
@@ -1814,7 +1800,6 @@ export const useGameStore = create<GameStore>((set, get) => ({
       const newPlayers = state.players.map(p => {
         const res = { ...p.resources };
         res.rubber += 1; res.oil += 1; res.gold += 1; res.food += 1;
-        console.log(`[Lucky7 UI] ${p.name} (${p.isAI ? 'AI' : 'Human'}) +1全資源 → rubber:${res.rubber} oil:${res.oil} gold:${res.gold} food:${res.food}`);
         return { ...p, resources: res };
       });
       set({

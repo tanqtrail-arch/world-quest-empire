@@ -115,7 +115,7 @@ function QuizCardBack({ onFlip }: { onFlip: () => void }) {
 
 /* ---- Confetti for correct answer ---- */
 function CorrectConfetti() {
-  const pieces = Array.from({ length: 24 }, (_, i) => ({
+  const pieces = Array.from({ length: 12 }, (_, i) => ({
     id: i,
     x: Math.random() * 100,
     delay: Math.random() * 0.3,

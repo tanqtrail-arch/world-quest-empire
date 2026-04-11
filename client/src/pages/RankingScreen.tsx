@@ -236,7 +236,7 @@ export default function RankingScreen() {
             <p className="mt-3 font-heading">読み込み中...</p>
           </div>
         ) : (
-          <AnimatePresence mode="wait">
+          <AnimatePresence mode="sync">
             {/* ---- Weekly / Lifetime ranking ---- */}
             {(tab === 'weekly' || tab === 'lifetime') && (
               <motion.div

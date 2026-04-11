@@ -15,7 +15,7 @@ import {
   getTileCenter, getHexPoints, getSvgDimensions,
 } from '@/lib/hexGeometry';
 import { motion, AnimatePresence } from 'framer-motion';
-import { useRef, useMemo } from 'react';
+import { useRef, useMemo, memo } from 'react';
 
 // --- Dice Result Zoom ---
 function DiceResultZoom({ diceTotal, players, resourceGains, playerColors, playerFlags, onClose, pendingEvent }: {
@@ -151,8 +151,8 @@ function DiceResultZoom({ diceTotal, players, resourceGains, playerColors, playe
   );
 }
 
-// --- Single Hex Tile ---
-function HexTile({ tile, cx, cy, isHighlighted, isDimmed }: {
+// --- Single Hex Tile (memoized: re-renders only when its props change) ---
+const HexTile = memo(function HexTile({ tile, cx, cy, isHighlighted, isDimmed }: {
   tile: GameTile;
   cx: number;
   cy: number;
@@ -259,30 +259,69 @@ function HexTile({ tile, cx, cy, isHighlighted, isDimmed }: {
       )}
     </g>
   );
-}
+});
 
 // --- Main HexMap Component ---
 export default function HexMap() {
-  const {
-    tiles, players, vertices, edges, settlements, roads, ports,
-    currentPlayerIndex, highlightedTileIds, highlightedVertexIds, highlightedEdgeIds,
-    buildMode, selectedVertexId, selectedEdgeId, selectVertex, selectEdge,
-    phase, diceResult, showResourceGains, dismissResourceGains, isPlayingAI,
-    pendingEvent, setupPhase, resourceGains, mapRows,
-    diceAnimationStep,
-  } = useGameStore();
+  // Narrow selectors — each subscribes only to a single slice so unrelated
+  // store updates (e.g. game log entries) do not re-render the map.
+  const tiles = useGameStore(s => s.tiles);
+  const players = useGameStore(s => s.players);
+  const vertices = useGameStore(s => s.vertices);
+  const edges = useGameStore(s => s.edges);
+  const settlements = useGameStore(s => s.settlements);
+  const roads = useGameStore(s => s.roads);
+  const ports = useGameStore(s => s.ports);
+  const currentPlayerIndex = useGameStore(s => s.currentPlayerIndex);
+  const highlightedTileIds = useGameStore(s => s.highlightedTileIds);
+  const highlightedVertexIds = useGameStore(s => s.highlightedVertexIds);
+  const highlightedEdgeIds = useGameStore(s => s.highlightedEdgeIds);
+  const buildMode = useGameStore(s => s.buildMode);
+  const selectedVertexId = useGameStore(s => s.selectedVertexId);
+  const selectedEdgeId = useGameStore(s => s.selectedEdgeId);
+  const selectVertex = useGameStore(s => s.selectVertex);
+  const selectEdge = useGameStore(s => s.selectEdge);
+  const phase = useGameStore(s => s.phase);
+  const diceResult = useGameStore(s => s.diceResult);
+  const showResourceGains = useGameStore(s => s.showResourceGains);
+  const dismissResourceGains = useGameStore(s => s.dismissResourceGains);
+  const isPlayingAI = useGameStore(s => s.isPlayingAI);
+  const pendingEvent = useGameStore(s => s.pendingEvent);
+  const setupPhase = useGameStore(s => s.setupPhase);
+  const resourceGains = useGameStore(s => s.resourceGains);
+  const mapRows = useGameStore(s => s.mapRows);
+  const diceAnimationStep = useGameStore(s => s.diceAnimationStep);
 
   const currentPlayer = players[currentPlayerIndex];
   const mapRef = useRef<HTMLDivElement>(null);
-  const { width: svgW, height: svgH } = getSvgDimensions(mapRows);
+  const { width: svgW, height: svgH } = useMemo(() => getSvgDimensions(mapRows), [mapRows]);
 
-  // Build maps
-  const playerColors: Record<string, string> = {};
-  const playerFlags: Record<string, string> = {};
-  players.forEach(p => {
-    playerColors[p.id] = p.color;
-    playerFlags[p.id] = p.flagEmoji;
-  });
+  // Player color/flag maps — only recompute when players array changes
+  const { playerColors, playerFlags } = useMemo(() => {
+    const colors: Record<string, string> = {};
+    const flags: Record<string, string> = {};
+    players.forEach(p => { colors[p.id] = p.color; flags[p.id] = p.flagEmoji; });
+    return { playerColors: colors, playerFlags: flags };
+  }, [players]);
+
+  // Lookup maps — turn O(n) finds into O(1) Map.get
+  const vertexMap = useMemo(() => {
+    const m = new Map<string, typeof vertices[number]>();
+    vertices.forEach(v => m.set(v.id, v));
+    return m;
+  }, [vertices]);
+
+  const edgeMap = useMemo(() => {
+    const m = new Map<string, typeof edges[number]>();
+    edges.forEach(e => m.set(e.id, e));
+    return m;
+  }, [edges]);
+
+  // Tile center positions are pure functions of mapRows and tile order
+  const tileCenters = useMemo(
+    () => tiles.map((_, i) => getTileCenter(i, mapRows)),
+    [tiles, mapRows]
+  );
 
   const diceTotal = diceResult ? diceResult[0] + diceResult[1] : 0;
   const shouldShowDiceZoom = phase === 'action' && diceResult && showResourceGains && !isPlayingAI && diceAnimationStep >= 4;
@@ -304,14 +343,14 @@ export default function HexMap() {
     const highlightedSet = new Set(highlightedTileIds);
     const ids = new Set<string>();
     settlements.forEach(s => {
-      const vertex = vertices.find(v => v.id === s.vertexId);
+      const vertex = vertexMap.get(s.vertexId);
       if (!vertex) return;
       if (vertex.adjacentTileIds.some(tid => highlightedSet.has(tid))) {
         ids.add(s.vertexId);
       }
     });
     return ids;
-  }, [phase, diceAnimationStep, highlightedTileIds, settlements, vertices, isPlayingAI]);
+  }, [phase, diceAnimationStep, highlightedTileIds, settlements, vertexMap, isPlayingAI]);
 
   // Dim non-highlighted tiles only when highlights are active
   const shouldDimTiles = effectiveHighlightIds.length > 0;
@@ -393,7 +432,7 @@ export default function HexMap() {
         >
           {/* Layer 1: Hex Tiles */}
           {tiles.map((tile, tileIdx) => {
-            const center = getTileCenter(tileIdx, mapRows);
+            const center = tileCenters[tileIdx];
             const isHighlighted = effectiveHighlightIds.includes(tile.id);
             const isDimmed = shouldDimTiles && !isHighlighted;
             return (
@@ -410,8 +449,8 @@ export default function HexMap() {
 
           {/* Layer 1.5: Ports (港) — large, colorful, labeled */}
           {ports.map((port: Port) => {
-            const v1 = vertices.find(v => v.id === port.vertexIds[0]);
-            const v2 = vertices.find(v => v.id === port.vertexIds[1]);
+            const v1 = vertexMap.get(port.vertexIds[0]);
+            const v2 = vertexMap.get(port.vertexIds[1]);
             if (!v1 || !v2) return null;
 
             // Position: midpoint of the two port vertices, shifted outward from map center
@@ -543,7 +582,7 @@ export default function HexMap() {
 
           {/* Layer 2: Roads (edges) */}
           {roads.map(road => {
-            const edge = edges.find(e => e.id === road.edgeId);
+            const edge = edgeMap.get(road.edgeId);
             if (!edge) return null;
             const color = playerColors[road.playerId] || '#888';
             return (
@@ -565,7 +604,7 @@ export default function HexMap() {
 
           {/* Layer 3: Interactive edges (buildable) */}
           {interactiveEdgeIds.map((edgeId: string) => {
-            const edge = edges.find(e => e.id === edgeId);
+            const edge = edgeMap.get(edgeId);
             if (!edge) return null;
             const isSelected = selectedEdgeId === edgeId;
             return (
@@ -596,7 +635,7 @@ export default function HexMap() {
 
           {/* Layer 4: Settlements (vertices with buildings) */}
           {settlements.map(settlement => {
-            const vertex = vertices.find(v => v.id === settlement.vertexId);
+            const vertex = vertexMap.get(settlement.vertexId);
             if (!vertex) return null;
             const pColor = playerColors[settlement.playerId] || '#888';
             const pFlag = playerFlags[settlement.playerId] || '🏳️';
@@ -690,7 +729,7 @@ export default function HexMap() {
 
           {/* Layer 5: Interactive vertices (buildable) */}
           {interactiveVertexIds.map((vertexId: string) => {
-            const vertex = vertices.find(v => v.id === vertexId);
+            const vertex = vertexMap.get(vertexId);
             if (!vertex) return null;
             const isSelected = selectedVertexId === vertexId;
 

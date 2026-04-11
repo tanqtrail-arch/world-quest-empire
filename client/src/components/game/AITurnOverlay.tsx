@@ -509,7 +509,7 @@ export default function AITurnOverlay() {
       />
 
       {/* Action card — hidden during ai_quiz (QuizPopup takes over) */}
-      <AnimatePresence mode="wait">
+      <AnimatePresence mode="sync">
         {currentAIAction && currentAIAction.type !== 'ai_quiz' && (
           <motion.div
             key={`${currentAIAction.type}-${currentAIAction.playerId}-${aiQueueLength}`}

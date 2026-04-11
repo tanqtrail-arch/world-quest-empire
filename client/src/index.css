@@ -293,12 +293,16 @@
     animation: slideUp 0.3s ease-out;
   }
 
+  /* GPU-friendly pulse: animate transform/opacity instead of box-shadow.
+     The shadow is set once (compositor layer) and the element scales subtly. */
   @keyframes pulse-glow {
-    0%, 100% { box-shadow: 0 0 8px rgba(46, 204, 113, 0.4); }
-    50% { box-shadow: 0 0 20px rgba(46, 204, 113, 0.8); }
+    0%, 100% { transform: scale(1); opacity: 0.85; }
+    50% { transform: scale(1.04); opacity: 1; }
   }
 
   .glow-pulse {
+    box-shadow: 0 0 14px rgba(46, 204, 113, 0.6);
+    will-change: transform, opacity;
     animation: pulse-glow 2s ease-in-out infinite;
   }
 

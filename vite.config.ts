@@ -19,6 +19,23 @@ export default defineConfig({
   build: {
     outDir: path.resolve(import.meta.dirname, "dist/public"),
     emptyOutDir: true,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          vendor: ['react', 'react-dom'],
+          ui: ['framer-motion', 'lucide-react'],
+          game: ['zustand', 'recharts'],
+          supabase: ['@supabase/supabase-js'],
+        },
+      },
+    },
+  },
+  esbuild: {
+    // Strip debug logging in production builds (keeps console.error/warn for real errors)
+    drop: process.env.NODE_ENV === 'production' ? ['debugger'] : [],
+    pure: process.env.NODE_ENV === 'production'
+      ? ['console.log', 'console.info', 'console.debug', 'console.table', 'console.group', 'console.groupEnd']
+      : [],
   },
   server: {
     port: 3000,

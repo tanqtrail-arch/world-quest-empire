@@ -346,44 +346,9 @@ export function getValidSettlementVertices(
   isSetupPhase: boolean,
   difficulty: Difficulty = 'normal'
 ): string[] {
-  const result = vertices
+  return vertices
     .filter(v => canBuildSettlement(v.id, playerId, vertices, settlements, roads, isSetupPhase, difficulty))
     .map(v => v.id);
-
-  // --- Debug logging ---
-  if (!isSetupPhase) {
-    const playerRoads = roads.filter(r => r.playerId === playerId);
-    const playerRoadEdgeIds = new Set(playerRoads.map(r => r.edgeId));
-
-    // Find all vertices connected to player's roads
-    const roadVertexIds = new Set<string>();
-    vertices.forEach(v => {
-      if (v.adjacentEdgeIds.some(eId => playerRoadEdgeIds.has(eId))) {
-        roadVertexIds.add(v.id);
-      }
-    });
-
-    const analysis: { vertex: string; canBuild: boolean; reason: string }[] = [];
-    roadVertexIds.forEach(vid => {
-      const canBuild = canBuildSettlement(vid, playerId, vertices, settlements, roads, false, difficulty);
-      if (settlements.some(s => s.vertexId === vid)) {
-        analysis.push({ vertex: vid, canBuild, reason: 'OCCUPIED' });
-      } else if (!canBuild) {
-        analysis.push({ vertex: vid, canBuild, reason: 'NO_ROAD' });
-      } else {
-        analysis.push({ vertex: vid, canBuild, reason: 'OK' });
-      }
-    });
-
-    console.group(`[Settlement] player=${playerId.slice(-6)}, roads=${playerRoads.length}, valid=${result.length}`);
-    console.table(analysis);
-    if (result.length === 0) {
-      console.warn('NO VALID VERTICES!');
-    }
-    console.groupEnd();
-  }
-
-  return result;
 }
 
 // Get all valid edge IDs for building a road

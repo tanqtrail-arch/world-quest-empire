@@ -108,7 +108,7 @@ function CircularTimer({ timeRemaining, total }: { timeRemaining: number; total:
 
 /* ---- Confetti ---- */
 function Confetti() {
-  const pieces = Array.from({ length: 30 }, (_, i) => ({
+  const pieces = Array.from({ length: 14 }, (_, i) => ({
     id: i,
     x: Math.random() * 100,
     delay: Math.random() * 0.3,
@@ -398,7 +398,7 @@ export default function QuizPracticeScreen() {
 
         {/* Main card area */}
         <div className="flex-1 flex items-start justify-center">
-          <AnimatePresence mode="wait">
+          <AnimatePresence mode="sync">
             {sessionEnded ? (
               <motion.div
                 key="result"
