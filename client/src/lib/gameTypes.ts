@@ -83,7 +83,7 @@ export interface Player {
 }
 
 // --- Event Card ---
-export type EventCategory = 'negative' | 'positive';
+export type EventCategory = 'negative' | 'positive' | 'special';
 
 export interface EventCard {
   id: string;
@@ -93,6 +93,9 @@ export interface EventCard {
   effectType: string;
   effectValue: number;
   icon: string;
+  learningPoint: string;
+  duration?: number;
+  requiresChoice?: boolean;
 }
 
 // --- Game Phase ---
@@ -217,17 +220,5 @@ export const TILE_DISTRIBUTION: TileType[] = [
 export const DICE_NUMBERS = [2, 3, 3, 4, 4, 5, 5, 6, 6, 8, 8, 9, 9, 10, 10, 11, 11, 12];
 
 // --- Event Cards Data ---
-export const EVENT_CARDS: Omit<EventCard, 'id'>[] = [
-  // Negative
-  { title: '現地の反発', description: '広がりすぎた！現地の人たちが怒っている。資源を2つ失う。', category: 'negative', effectType: 'lose_resources', effectValue: 2, icon: '😠' },
-  { title: '独立運動', description: '海外の拠点で独立運動が起きた！拠点が1つなくなる。', category: 'negative', effectType: 'lose_structure', effectValue: 1, icon: '✊' },
-  { title: '国際問題', description: '他の国から文句を言われた。1ターン行動できない。', category: 'negative', effectType: 'skip_turn', effectValue: 1, icon: '🌐' },
-  { title: '物流トラブル', description: '船が嵐にあった！食料を2つ失う。', category: 'negative', effectType: 'lose_food', effectValue: 2, icon: '🌊' },
-  { title: '暴動', description: '不満が爆発！ゴムと石油を1つずつ失う。', category: 'negative', effectType: 'lose_resources', effectValue: 2, icon: '🔥' },
-  // Positive
-  { title: '資源ラッシュ！', description: '好きな資源2つゲット！', category: 'positive', effectType: 'gain_resources', effectValue: 2, icon: '💎' },
-  { title: '外交成功', description: '他の国と仲良くなった！好きな資源1つゲット！', category: 'positive', effectType: 'gain_resources', effectValue: 1, icon: '🤝' },
-  { title: '技術革新', description: '新しい技術を発見！次の建設コストが半分になる。', category: 'positive', effectType: 'discount_build', effectValue: 50, icon: '⚡' },
-  { title: '支援物資', description: '友好国から物資が届いた！全資源1つずつゲット！', category: 'positive', effectType: 'gain_all', effectValue: 1, icon: '📦' },
-  { title: '新航路発見', description: '新しい航路を見つけた！道を1つ無料で建設できる！', category: 'positive', effectType: 'free_road', effectValue: 1, icon: '🧭' },
-];
+// 新イベントカードシステムは client/src/lib/eventCards.ts に定義
+export { EVENT_CARDS } from './eventCards';

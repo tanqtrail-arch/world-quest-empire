@@ -731,39 +731,182 @@ export const useGameStore = create<GameStore>((set, get) => ({
     const newPlayers = state.players.map(p => ({ ...p, resources: { ...p.resources } }));
     const updatedPlayer = newPlayers.find(p => p.id === player.id)!;
     const newSettlements = [...state.settlements];
+    const newRoads = [...state.roads];
 
-    // Apply event effects inline
+    // Apply event effects using new card system
     const event = state.currentEvent;
-    let resultMsg = `${event.title}: ${event.description}`;
-    if (event.effectType === 'lose_resource') {
-      const resources: ResourceType[] = ['rubber', 'oil', 'gold', 'food'];
+    const resources: ResourceType[] = ['rubber', 'oil', 'gold', 'food'];
+    let resultMsg = `${event.icon} ${event.title}: ${event.description}`;
+    let skipAction = false;
+    const et = event.effectType as string;
+
+    // --- ネガティブカード ---
+    if (et === 'rebellion') {
+      let lost = 0;
+      for (let i = 0; i < (event.effectValue || 2); i++) {
+        const avail = resources.filter(r => updatedPlayer.resources[r] > 0);
+        if (avail.length === 0) break;
+        const res = avail[Math.floor(Math.random() * avail.length)];
+        updatedPlayer.resources[res]--;
+        lost++;
+      }
+      resultMsg = `${event.icon}${event.title}→資源を${lost}つ失った！`;
+
+    } else if (et === 'storm') {
+      let lost = 0;
+      for (let i = 0; i < 3; i++) {
+        const avail = resources.filter(r => updatedPlayer.resources[r] > 0);
+        if (avail.length === 0) break;
+        const res = avail[Math.floor(Math.random() * avail.length)];
+        updatedPlayer.resources[res]--;
+        lost++;
+      }
+      resultMsg = `${event.icon}${event.title}→資源を${lost}つ失った！`;
+
+    } else if (et === 'depression') {
+      newPlayers.forEach(p => { p.resources.gold = Math.floor(p.resources.gold / 2); });
+      resultMsg = `${event.icon}${event.title}→全プレイヤーの金が半分に！`;
+
+    } else if (et === 'plague') {
+      const loss = Math.min(updatedPlayer.resources.food, 2);
+      updatedPlayer.resources.food -= loss;
+      resultMsg = `${event.icon}${event.title}→食料を${loss}つ失った`;
+
+    } else if (et === 'independence') {
+      const mySettlements = newSettlements.filter(s => s.playerId === player.id && s.level === 'settlement');
+      if (mySettlements.length > 1) {
+        const target = mySettlements[Math.floor(Math.random() * mySettlements.length)];
+        const idx = newSettlements.findIndex(s => s.vertexId === target.vertexId && s.playerId === player.id);
+        if (idx !== -1) newSettlements.splice(idx, 1);
+        updatedPlayer.victoryPoints = Math.max(0, updatedPlayer.victoryPoints - 1);
+        resultMsg = `${event.icon}${event.title}→拠点1つ失った！`;
+      } else {
+        let lc = 0;
+        for (let i = 0; i < 2; i++) {
+          const avail = resources.filter(r => updatedPlayer.resources[r] > 0);
+          if (avail.length === 0) break;
+          updatedPlayer.resources[avail[Math.floor(Math.random() * avail.length)]]--;
+          lc++;
+        }
+        resultMsg = `${event.icon}${event.title}→資源${lc}つ失った`;
+      }
+
+    } else if (et === 'sanction') {
+      skipAction = true;
+      resultMsg = `${event.icon}${event.title}→このターン行動できない！`;
+
+    } else if (et === 'border_conflict') {
+      const avail = resources.filter(r => updatedPlayer.resources[r] > 0);
+      if (avail.length > 0) {
+        updatedPlayer.resources[avail[Math.floor(Math.random() * avail.length)]]--;
+      }
+      resultMsg = `${event.icon}${event.title}→資源を1つ失った`;
+
+    // --- ポジティブカード（資源選択系） ---
+    } else if (et === 'industrial_rev' || et === 'diplomacy' || et === 'discovery') {
+      const pickCount = et === 'diplomacy' ? 3 : et === 'industrial_rev' ? 2 : 1;
+      // ランダムで資源を付与（resourcePickMode未実装のためフォールバック）
+      for (let i = 0; i < pickCount; i++) {
+        const res = resources[Math.floor(Math.random() * resources.length)];
+        updatedPlayer.resources[res]++;
+      }
+      resultMsg = `${event.icon}${event.title}→資源を${pickCount}つゲット！`;
+
+    // --- ポジティブカード（即時効果） ---
+    } else if (et === 'aid' || et === 'peace_treaty') {
+      resources.forEach(res => { updatedPlayer.resources[res] += 1; });
+      resultMsg = `${event.icon}${event.title}→全資源+1！`;
+
+    } else if (et === 'expo') {
+      updatedPlayer.victoryPoints += 1;
+      resultMsg = `${event.icon}${event.title}→★VP+1！`;
+
+    } else if (et === 'railroad') {
+      const validEdges = getValidRoadEdges(player.id, state.edges, state.vertices, newSettlements, state.roads, false);
+      if (validEdges.length > 0) {
+        const edgeId = validEdges[Math.floor(Math.random() * validEdges.length)];
+        newRoads.push({ edgeId, playerId: player.id });
+        resultMsg = `${event.icon}${event.title}→道を1つ無料で建設！`;
+      } else {
+        resultMsg = `${event.icon}${event.title}→建設できる場所がなかった`;
+      }
+
+    // --- 特殊カード ---
+    } else if (et === 'pirate') {
+      const avail = resources.filter(r => updatedPlayer.resources[r] > 0);
+      if (avail.length > 0) {
+        updatedPlayer.resources[avail[Math.floor(Math.random() * avail.length)]]--;
+        resultMsg = `${event.icon}${event.title}→海賊に資源を奪われた！`;
+      } else {
+        resultMsg = `${event.icon}${event.title}→資源がなくて助かった！`;
+      }
+
+    } else if (et === 'forced_trade') {
+      const others = newPlayers.filter(p => p.id !== player.id);
+      if (others.length > 0) {
+        const target = others[Math.floor(Math.random() * others.length)];
+        const myAvail = resources.filter(r => updatedPlayer.resources[r] > 0);
+        const theirAvail = resources.filter(r => target.resources[r] > 0);
+        if (myAvail.length > 0 && theirAvail.length > 0) {
+          const give = myAvail[Math.floor(Math.random() * myAvail.length)];
+          const take = theirAvail[Math.floor(Math.random() * theirAvail.length)];
+          updatedPlayer.resources[give]--;
+          target.resources[take]--;
+          updatedPlayer.resources[take]++;
+          target.resources[give]++;
+          resultMsg = `${event.icon}${event.title}→${target.name}と資源を交換！`;
+        } else {
+          resultMsg = `${event.icon}${event.title}→交換できなかった`;
+        }
+      } else {
+        resultMsg = `${event.icon}${event.title}→対象がいなかった`;
+      }
+
+    } else if (et === 'vote') {
+      const others = newPlayers.filter(p => p.id !== player.id);
+      if (others.length > 0) {
+        const target = others[Math.floor(Math.random() * others.length)];
+        let lc = 0;
+        for (let i = 0; i < 2; i++) {
+          const avail = resources.filter(r => target.resources[r] > 0);
+          if (avail.length === 0) break;
+          target.resources[avail[Math.floor(Math.random() * avail.length)]]--;
+          lc++;
+        }
+        resultMsg = `${event.icon}${event.title}→${target.name}が資源${lc}つ失った！`;
+      } else {
+        resultMsg = `${event.icon}${event.title}→対象がいなかった`;
+      }
+
+    // --- 旧カード互換 ---
+    } else if (et === 'lose_resource') {
       const res = resources[Math.floor(Math.random() * resources.length)];
       const loss = Math.min(updatedPlayer.resources[res], event.effectValue);
       updatedPlayer.resources[res] -= loss;
-      const resName = res === 'rubber' ? 'ゴム' : res === 'oil' ? '石油' : res === 'gold' ? '金' : '食料';
-      resultMsg = `${event.title}: ${resName}を${loss}つ失った！`;
-    } else if (event.effectType === 'gain_resource') {
-      const resources: ResourceType[] = ['rubber', 'oil', 'gold', 'food'];
+      resultMsg = `${event.icon || ''}${event.title}: 資源を${loss}つ失った！`;
+    } else if (et === 'gain_resource') {
       const res = resources[Math.floor(Math.random() * resources.length)];
       updatedPlayer.resources[res] += event.effectValue;
-      const resName = res === 'rubber' ? 'ゴム' : res === 'oil' ? '石油' : res === 'gold' ? '金' : '食料';
-      resultMsg = `${event.title}: ${resName}を${event.effectValue}つ獲得！`;
-    } else if (event.effectType === 'lose_all_resource') {
-      const resources: ResourceType[] = ['rubber', 'oil', 'gold', 'food'];
+      resultMsg = `${event.icon || ''}${event.title}: 資源を${event.effectValue}つ獲得！`;
+    } else if (et === 'lose_all_resource') {
       const res = resources[Math.floor(Math.random() * resources.length)];
       const loss = updatedPlayer.resources[res];
       updatedPlayer.resources[res] = 0;
-      const resName = res === 'rubber' ? 'ゴム' : res === 'oil' ? '石油' : res === 'gold' ? '金' : '食料';
-      resultMsg = `${event.title}: ${resName}を全て失った！(${loss}個)`;
+      resultMsg = `${event.icon || ''}${event.title}: 資源を全て失った！(${loss}個)`;
     }
 
     set({
       players: newPlayers,
       settlements: newSettlements,
+      roads: newRoads,
       currentEvent: null,
-      phase: 'action',
+      phase: skipAction ? 'action' : 'action',
       gameLog: [...state.gameLog, generateGameLog(resultMsg, 'event', player.id)],
     });
+
+    if (skipAction) {
+      get().doEndTurn();
+    }
   },
 
   // =============================================
