@@ -999,6 +999,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
     const newRoads = [...state.roads];
     const preview = state.eventEffectPreview;
 
+<<<<<<< Updated upstream
     // Apply event effects
     const event = state.currentEvent;
     const resources: ResourceType[] = ['rubber', 'oil', 'gold', 'food'];
@@ -1073,6 +1074,11 @@ export const useGameStore = create<GameStore>((set, get) => ({
     } else {
       resultMsg = `${event.icon}${event.title}→${event.description}`;
     }
+=======
+    // Apply event effects using eventCardEffects system
+    const event = state.currentEvent;
+    const resultMsg = `${event.icon} ${event.title}: ${event.description}`;
+>>>>>>> Stashed changes
 
     set({
       players: newPlayers,

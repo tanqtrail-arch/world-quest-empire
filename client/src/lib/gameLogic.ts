@@ -798,8 +798,8 @@ export function getRandomEvent(difficulty: Difficulty): EventCard | null {
   const chance = difficulty === 'easy' ? 0.4 : difficulty === 'normal' ? 0.6 : 0.8;
   if (Math.random() > chance) return null;
 
-  const event = EVENT_CARDS[Math.floor(Math.random() * EVENT_CARDS.length)];
-  return { ...event, id: genId() };
+  const template = EVENT_CARDS[Math.floor(Math.random() * EVENT_CARDS.length)];
+  return { ...template, id: genId() } as EventCard;
 }
 
 export function generateGameLog(message: string, type?: GameLogEntry['type'], playerId?: string): GameLogEntry {
