@@ -1861,9 +1861,18 @@ export const useGameStore = create<GameStore>((set, get) => ({
         aiActionQueue: queue,
       });
     } else if (action.type === 'build_settlement' && action.vertexId) {
+      // Guard: only deduct cost if the player can actually afford it during
+      // the animation. Final state is reconciled from _finalSimPlayers when
+      // the queue drains, so the board still ends up correct either way —
+      // this just prevents a transient negative-resource flash in the UI.
       const cost = BUILD_COSTS.settlement;
       const newPlayers = state.players.map(p => {
         if (p.id !== action.playerId) return p;
+        const canPay = (Object.entries(cost) as [ResourceType, number][])
+          .every(([r, amt]) => p.resources[r] >= amt);
+        if (!canPay) {
+          return { ...p, victoryPoints: p.victoryPoints + 1 };
+        }
         const res = { ...p.resources };
         (Object.entries(cost) as [ResourceType, number][]).forEach(([r, amt]) => { res[r] -= amt; });
         return { ...p, resources: res, victoryPoints: p.victoryPoints + 1 };
@@ -1884,6 +1893,9 @@ export const useGameStore = create<GameStore>((set, get) => ({
       const cost = BUILD_COSTS.road;
       const newPlayers = state.players.map(p => {
         if (p.id !== action.playerId) return p;
+        const canPay = (Object.entries(cost) as [ResourceType, number][])
+          .every(([r, amt]) => p.resources[r] >= amt);
+        if (!canPay) return p;
         const res = { ...p.resources };
         (Object.entries(cost) as [ResourceType, number][]).forEach(([r, amt]) => { res[r] -= amt; });
         return { ...p, resources: res };
@@ -1903,6 +1915,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
       // Trade action (reuses build_road type)
       const newPlayers = state.players.map(p => {
         if (p.id !== action.playerId) return p;
+        if (p.resources[action.tradeFrom!] < 3) return p;
         const res = { ...p.resources };
         res[action.tradeFrom!] -= 3;
         res[action.tradeTo!] += 1;
@@ -1918,6 +1931,11 @@ export const useGameStore = create<GameStore>((set, get) => ({
       const cost = BUILD_COSTS.city;
       const newPlayers = state.players.map(p => {
         if (p.id !== action.playerId) return p;
+        const canPay = (Object.entries(cost) as [ResourceType, number][])
+          .every(([r, amt]) => p.resources[r] >= amt);
+        if (!canPay) {
+          return { ...p, victoryPoints: p.victoryPoints + 1 };
+        }
         const res = { ...p.resources };
         (Object.entries(cost) as [ResourceType, number][]).forEach(([r, amt]) => { res[r] -= amt; });
         return { ...p, resources: res, victoryPoints: p.victoryPoints + 1 };
