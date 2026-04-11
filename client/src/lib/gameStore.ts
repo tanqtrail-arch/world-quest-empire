@@ -8,6 +8,8 @@ import {
   BUILD_COSTS, VP_VALUES, WINNING_SCORE, PLAYER_COLORS, RESOURCE_INFO,
   TRADE_RATE_DEFAULT, QUIZ_QUESTIONS, QUIZ_TIMER_SECONDS, TURN_TIMER_SECONDS,
 } from './gameTypes';
+import { EVENT_CARDS } from './eventCards';
+import { applyEventEffect, type EffectContext } from './eventCardEffects';
 import {
   generateMap, generateVerticesAndEdges, getMapRows, createPlayer, rollDice,
   distributeResourcesWithVertices, canAfford, payCost,
@@ -21,7 +23,7 @@ import {
 
 // --- AI Action Types ---
 export interface AIAction {
-  type: 'turn_start' | 'dice_roll' | 'resource_gain' | 'dice_gains' | 'lucky_seven' | 'no_resource' | 'build_road' | 'build_settlement' | 'upgrade_city' | 'event' | 'turn_end' | 'ai_quiz';
+  type: 'turn_start' | 'dice_roll' | 'resource_gain' | 'dice_gains' | 'lucky_seven' | 'no_resource' | 'build_road' | 'build_settlement' | 'upgrade_city' | 'event' | 'event_card' | 'turn_end' | 'ai_quiz';
   playerId: string;
   playerName: string;
   playerFlag: string;
@@ -47,6 +49,8 @@ export interface AIAction {
   quizQuestion?: QuizQuestion;
   quizAIChoiceIndex?: number;
   quizAICorrect?: boolean;
+  // Event card payload
+  eventCard?: EventCard;
 }
 
 // --- Resource Gain Popup ---
@@ -84,6 +88,12 @@ interface GameStore {
   pendingEvent: EventCard | null;
   winner: Player | null;
   longestRoadPlayerId: string | null;
+
+  // Event card persistent state
+  tradeBlocked: boolean;                                          // 貿易制裁: このターン行動不可（次ターン開始で解除）
+  tempVP: { playerId: string; amount: number; remainingTurns: number }[]; // 万博などの一時VP
+  peaceTreatyTurns: number;                                       // 平和条約の残りターン数
+  blockedSettlementId: string | null;                             // 将来拡張用: 拠点ブロック
 
   // Setup phase
   setupPhase: {
@@ -202,6 +212,11 @@ export const useGameStore = create<GameStore>((set, get) => ({
   winner: null,
   longestRoadPlayerId: null,
 
+  tradeBlocked: false,
+  tempVP: [],
+  peaceTreatyTurns: 0,
+  blockedSettlementId: null,
+
   setupPhase: null,
   resourcePickMode: null,
   eventEffectPreview: null,
@@ -286,6 +301,10 @@ export const useGameStore = create<GameStore>((set, get) => ({
       pendingEvent: null,
       winner: null,
       longestRoadPlayerId: null,
+      tradeBlocked: false,
+      tempVP: [],
+      peaceTreatyTurns: 0,
+      blockedSettlementId: null,
       resourcePickMode: null,
       eventEffectPreview: null,
       setupPhase: {
@@ -986,107 +1005,69 @@ export const useGameStore = create<GameStore>((set, get) => ({
   },
 
   // =============================================
-  // EVENT HANDLING
+  // EVENT HANDLING (dispatches to eventCardEffects.ts)
   // =============================================
   handleEvent: () => {
     const state = get();
     if (!state.currentEvent) return;
 
     const player = state.players[state.currentPlayerIndex];
-    const newPlayers = state.players.map(p => ({ ...p, resources: { ...p.resources } }));
-    const updatedPlayer = newPlayers.find(p => p.id === player.id)!;
-    const newSettlements = [...state.settlements];
-    const newRoads = [...state.roads];
-    const preview = state.eventEffectPreview;
-
-    // Apply event effects
     const event = state.currentEvent;
-    const resources: ResourceType[] = ['rubber', 'oil', 'gold', 'food'];
-    let resultMsg = '';
-    let skipAction = false;
 
-    if (event.effectType === 'lose_resources') {
-      // Use pre-rolled resource from preview
-      const res = preview?.preRolledResource || resources[Math.floor(Math.random() * resources.length)];
-      const loss = Math.min(updatedPlayer.resources[res], event.effectValue);
-      updatedPlayer.resources[res] -= loss;
-      resultMsg = `${event.icon}${event.title}→${RESOURCE_INFO[res].icon}${RESOURCE_INFO[res].name}${loss}つ失った`;
+    const ctx: EffectContext = {
+      players: state.players,
+      currentPlayerId: player.id,
+      settlements: state.settlements,
+      roads: state.roads,
+      edges: state.edges.map(e => ({ id: e.id, v1: e.vertexIds[0], v2: e.vertexIds[1] })),
+      vertices: state.vertices.map(v => ({ id: v.id, x: v.x, y: v.y })),
+    };
 
-    } else if (event.effectType === 'lose_food') {
-      const loss = Math.min(updatedPlayer.resources.food, event.effectValue);
-      updatedPlayer.resources.food -= loss;
-      resultMsg = `${event.icon}${event.title}→🌾食料${loss}つ失った`;
+    const result = applyEventEffect(event, ctx);
 
-    } else if (event.effectType === 'lose_structure') {
-      const mySettlements = newSettlements.filter(s => s.playerId === player.id && s.level === 'settlement');
-      if (mySettlements.length > 0) {
-        const target = mySettlements[Math.floor(Math.random() * mySettlements.length)];
-        const idx = newSettlements.findIndex(s => s.vertexId === target.vertexId && s.playerId === player.id);
-        if (idx !== -1) newSettlements.splice(idx, 1);
-        updatedPlayer.victoryPoints = Math.max(0, updatedPlayer.victoryPoints - 1);
-        resultMsg = `${event.icon}${event.title}→🏠拠点1つ失った（★${player.victoryPoints}→${updatedPlayer.victoryPoints}）`;
-      } else {
-        resultMsg = `${event.icon}${event.title}→失う拠点がなかった`;
-      }
-
-    } else if (event.effectType === 'skip_turn') {
-      skipAction = true;
-      resultMsg = `${event.icon}${event.title}→このターン行動できない！`;
-
-    } else if (event.effectType === 'gain_resources') {
+    // requires player to pick resources → enter pick mode and wait for pickResource calls
+    if (result.requiresChoice === 'pick_resource' && result.choiceCount) {
       set({
         currentEvent: null,
         eventEffectPreview: null,
         phase: 'action',
         highlightedTileIds: [],
         diceAnimationStep: 0 as 0 | 1 | 2 | 3 | 4,
-        resourcePickMode: { remaining: event.effectValue, eventTitle: event.title },
-        gameLog: [...state.gameLog, generateGameLog(`${event.icon}${event.title}→好きな資源を${event.effectValue}つ選ぼう！`, 'event', player.id)],
+        resourcePickMode: { remaining: result.choiceCount, eventTitle: event.title },
+        gameLog: [...state.gameLog, generateGameLog(result.message, 'event', player.id)],
       });
       return;
+    }
 
-    } else if (event.effectType === 'gain_all') {
-      resources.forEach(res => { updatedPlayer.resources[res] += event.effectValue; });
-      resultMsg = `${event.icon}${event.title}→🌿+1 🛢️+1 💰+1 🌾+1 全部もらった！`;
-
-    } else if (event.effectType === 'discount_build') {
-      set({
-        currentEvent: null,
-        eventEffectPreview: null,
-        phase: 'action',
-        highlightedTileIds: [],
-        diceAnimationStep: 0 as 0 | 1 | 2 | 3 | 4,
-        resourcePickMode: { remaining: 2, eventTitle: event.title },
-        gameLog: [...state.gameLog, generateGameLog(`${event.icon}${event.title}→好きな資源を2つ選ぼう！`, 'event', player.id)],
-      });
-      return;
-
-    } else if (event.effectType === 'free_road') {
-      const validEdges = getValidRoadEdges(player.id, state.edges, state.vertices, newSettlements, state.roads, false);
-      if (validEdges.length > 0) {
-        const edgeId = validEdges[Math.floor(Math.random() * validEdges.length)];
-        newRoads.push({ edgeId, playerId: player.id });
-        resultMsg = `${event.icon}${event.title}→🛤️道を1つ無料で建設！`;
-      } else {
-        resultMsg = `${event.icon}${event.title}→建設できる場所がなかった`;
-      }
-    } else {
-      resultMsg = `${event.icon}${event.title}→${event.description}`;
+    // Persistent effects
+    const patch: Partial<GameStore> = {};
+    if (event.effectType === 'sanction') {
+      patch.tradeBlocked = true;
+    }
+    if (event.effectType === 'peace_treaty' && event.duration) {
+      patch.peaceTreatyTurns = event.duration;
+    }
+    if (event.effectType === 'expo' && event.duration) {
+      patch.tempVP = [
+        ...state.tempVP,
+        { playerId: player.id, amount: 1, remainingTurns: event.duration },
+      ];
     }
 
     set({
-      players: newPlayers,
-      settlements: newSettlements,
-      roads: newRoads,
+      players: result.players ?? state.players,
+      settlements: result.settlements ?? state.settlements,
+      roads: result.roads ?? state.roads,
       currentEvent: null,
       eventEffectPreview: null,
       phase: 'action',
       highlightedTileIds: [],
       diceAnimationStep: 0 as 0 | 1 | 2 | 3 | 4,
-      gameLog: [...state.gameLog, generateGameLog(resultMsg, 'event', player.id)],
-    });
+      gameLog: [...state.gameLog, generateGameLog(result.message, 'event', player.id)],
+      ...patch,
+    } as any);
 
-    if (skipAction) {
+    if (result.skipAction) {
       get().doEndTurn();
     }
   },
@@ -1209,12 +1190,21 @@ export const useGameStore = create<GameStore>((set, get) => ({
   },
 
   dismissQuiz: () => {
+    const state = get();
+    // After quiz on a 7 roll, draw an event card.
+    const drawn = EVENT_CARDS[Math.floor(Math.random() * EVENT_CARDS.length)];
+    const card: EventCard = { ...drawn, id: genId() };
     set({
-      phase: 'action',
+      phase: 'event',
       currentQuiz: null,
       quizResult: null,
       quizResourcePickRemaining: 0,
       turnTimerPausedForQuiz: false,
+      currentEvent: card,
+      gameLog: [
+        ...state.gameLog,
+        generateGameLog(`🎴 運命のカード: ${card.icon} ${card.title}`, 'event', state.players[state.currentPlayerIndex].id),
+      ],
     });
   },
 
@@ -1324,7 +1314,11 @@ export const useGameStore = create<GameStore>((set, get) => ({
           // Lucky 7: ALL players gain +1 of every resource
           const allRes: ResourceType[] = ['rubber', 'oil', 'gold', 'food'];
           simPlayers.forEach(p => {
-            allRes.forEach(res => { p.resources[res] += 1; });
+            p.resources.rubber += 1;
+            p.resources.oil += 1;
+            p.resources.gold += 1;
+            p.resources.food += 1;
+            console.log(`[Lucky7] ${p.name} (${p.isAI ? 'AI' : 'Human'}) +1全資源 → rubber:${p.resources.rubber} oil:${p.resources.oil} gold:${p.resources.gold} food:${p.resources.food}`);
           });
           // Build a per-player summary like "🇯🇵 🌿+1 🛢️+1 💰+1 🌾+1"
           simPlayers.forEach(p => {
@@ -1435,6 +1429,54 @@ export const useGameStore = create<GameStore>((set, get) => ({
               eventDetail: lossText,
             });
           }
+
+          // ----- AI draws an event card -----
+          const drawn = EVENT_CARDS[Math.floor(Math.random() * EVENT_CARDS.length)];
+          const aiCard: EventCard = { ...drawn, id: genId() };
+          const aiCtx: EffectContext = {
+            players: simPlayers,
+            currentPlayerId: aiP.id,
+            settlements: simSettlements,
+            roads: simRoads,
+            edges: state.edges.map(e => ({ id: e.id, v1: e.vertexIds[0], v2: e.vertexIds[1] })),
+            vertices: state.vertices.map(v => ({ id: v.id, x: v.x, y: v.y })),
+          };
+          const aiResult = applyEventEffect(aiCard, aiCtx);
+          // Apply result to sim (AI cannot pick — skip requiresChoice cards gracefully)
+          if (aiResult.players) {
+            // Copy back to simPlayers
+            aiResult.players.forEach(np => {
+              const p = simPlayers.find(pp => pp.id === np.id);
+              if (p) {
+                p.resources = { ...np.resources };
+                p.victoryPoints = np.victoryPoints;
+              }
+            });
+          }
+          if (aiResult.settlements) {
+            simSettlements.length = 0;
+            aiResult.settlements.forEach(s => simSettlements.push(s));
+          }
+          if (aiResult.roads) {
+            simRoads.length = 0;
+            aiResult.roads.forEach(r => simRoads.push(r));
+          }
+          // For requiresChoice cards, give AI some free resources (2 best)
+          if (aiResult.requiresChoice === 'pick_resource' && aiResult.choiceCount) {
+            const sorted = [...allRes].sort((a, b) => aiP.resources[a] - aiP.resources[b]);
+            for (let i = 0; i < aiResult.choiceCount; i++) {
+              aiP.resources[sorted[i % sorted.length]] += 1;
+            }
+          }
+          logs.push(generateGameLog(`🎴 ${aiP.name} 運命のカード: ${aiCard.icon} ${aiCard.title}`, 'event', aiP.id));
+          aiActions.push({
+            type: 'event_card',
+            playerId: aiP.id,
+            playerName: aiP.countryName,
+            playerFlag: aiP.flagEmoji,
+            playerColor: aiP.color,
+            eventCard: aiCard,
+          });
         } else {
           // Normal dice: distribute from tiles
           const gains = distributeResourcesWithVertices(
@@ -1509,8 +1551,13 @@ export const useGameStore = create<GameStore>((set, get) => ({
           if (a.type === 'trade') {
             if (a.tradeFrom && a.tradeTo) {
               const tradeRate = getTradeRate(aiP.id, a.tradeFrom, simSettlements, state.ports);
+              if (aiP.resources[a.tradeFrom] < tradeRate) {
+                console.log(`[AI Skip] ${aiP.name} cannot afford trade ${a.tradeFrom}x${tradeRate}. has:${aiP.resources[a.tradeFrom]}`);
+                return;
+              }
               aiP.resources[a.tradeFrom] -= tradeRate;
               aiP.resources[a.tradeTo] += 1;
+              console.log(`[AI Trade] ${aiP.name} ${a.tradeFrom}-${tradeRate} → ${a.tradeTo}+1, resources:`, { ...aiP.resources });
               const fromInfo = RESOURCE_INFO[a.tradeFrom];
               const toInfo = RESOURCE_INFO[a.tradeTo];
               logs.push(generateGameLog(`${aiP.flagEmoji} ${aiP.name}が${fromInfo.icon}${fromInfo.name}×${tradeRate}→${toInfo.icon}${toInfo.name}×1に交換`, 'trade', aiP.id));
@@ -1533,6 +1580,15 @@ export const useGameStore = create<GameStore>((set, get) => ({
           const cost = a.type === 'build_settlement' ? BUILD_COSTS.settlement
             : a.type === 'build_road' ? BUILD_COSTS.road
             : BUILD_COSTS.city;
+
+          // Affordability check — skip action if AI cannot pay
+          const canAfford = (Object.entries(cost) as [ResourceType, number][])
+            .every(([res, amt]) => aiP.resources[res] >= amt);
+          if (!canAfford) {
+            console.log(`[AI Skip] ${aiP.name} cannot afford ${a.type}. resources:`, { ...aiP.resources }, 'cost:', cost);
+            return;
+          }
+
           const costParts = (Object.entries(cost) as [ResourceType, number][])
             .map(([res, amt]) => `${RESOURCE_INFO[res].icon}-${amt}`);
           const costText = costParts.join(' ');
@@ -1541,6 +1597,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
           (Object.entries(cost) as [ResourceType, number][]).forEach(([res, amt]) => {
             aiP.resources[res] -= amt;
           });
+          console.log(`[AI Build] ${aiP.name} ${a.type} → resources:`, { ...aiP.resources });
 
           // Update sim board state
           if (a.type === 'build_settlement' && a.vertexId) {
@@ -1753,11 +1810,11 @@ export const useGameStore = create<GameStore>((set, get) => ({
         players: newPlayers,
       });
     } else if (action.type === 'lucky_seven') {
-      // Apply all +1 resources at once
+      // Apply +1 of every resource to ALL players (not just the AI who rolled)
       const newPlayers = state.players.map(p => {
-        if (p.id !== action.playerId) return p;
         const res = { ...p.resources };
         res.rubber += 1; res.oil += 1; res.gold += 1; res.food += 1;
+        console.log(`[Lucky7 UI] ${p.name} (${p.isAI ? 'AI' : 'Human'}) +1全資源 → rubber:${res.rubber} oil:${res.oil} gold:${res.gold} food:${res.food}`);
         return { ...p, resources: res };
       });
       set({
@@ -1780,6 +1837,12 @@ export const useGameStore = create<GameStore>((set, get) => ({
       });
     } else if (action.type === 'ai_quiz') {
       // Resources are already applied in sim; the UI popup is purely cosmetic.
+      set({
+        currentAIAction: action,
+        aiActionQueue: queue,
+      });
+    } else if (action.type === 'event_card') {
+      // Effect already applied to simPlayers; show the card UI purely cosmetically.
       set({
         currentAIAction: action,
         aiActionQueue: queue,

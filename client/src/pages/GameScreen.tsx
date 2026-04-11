@@ -13,6 +13,7 @@ import PlayerPanel from '@/components/game/PlayerPanel';
 import DiceRoller from '@/components/game/DiceRoller';
 import ActionMenu from '@/components/game/ActionMenu';
 import EventPopup from '@/components/game/EventPopup';
+import EventCardDisplay from '@/components/game/EventCardDisplay';
 import QuizPopup from '@/components/game/QuizPopup';
 import GameLog from '@/components/game/GameLog';
 import AITurnOverlay from '@/components/game/AITurnOverlay';
@@ -63,6 +64,27 @@ function TileHelpTooltip({ onClose }: { onClose: () => void }) {
       </div>
     </motion.div>
   );
+}
+
+// Event card 3D flip host — shows human's drawn card (phase==='event') or AI's drawn card
+function EventCardDisplayHost() {
+  const phase = useGameStore(s => s.phase);
+  const currentEvent = useGameStore(s => s.currentEvent);
+  const currentAIAction = useGameStore(s => s.currentAIAction);
+  const handleEvent = useGameStore(s => s.handleEvent);
+  const resourcePickMode = useGameStore(s => s.resourcePickMode);
+
+  // Priority 1: human event card
+  if (phase === 'event' && currentEvent && !resourcePickMode) {
+    return <EventCardDisplay card={currentEvent} onDismiss={handleEvent} />;
+  }
+
+  // Priority 2: AI event card action
+  if (currentAIAction?.type === 'event_card' && currentAIAction.eventCard) {
+    return <EventCardDisplay card={currentAIAction.eventCard} />;
+  }
+
+  return null;
 }
 
 // Handoff screen for local multiplayer
@@ -305,8 +327,11 @@ export default function GameScreen() {
       {/* Resource Gain Popup */}
       <ResourcePopup />
 
-      {/* Event Popup Overlay */}
+      {/* Event Popup Overlay (handles resource-pick UI after EventCardDisplay) */}
       <EventPopup />
+
+      {/* Event Card 3D flip display (replaces legacy card face) */}
+      <EventCardDisplayHost />
 
       {/* Quiz Popup Overlay */}
       <QuizPopup />

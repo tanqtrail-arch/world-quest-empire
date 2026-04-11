@@ -19,6 +19,7 @@ const ACTION_DURATIONS: Record<AIAction['type'], number> = {
   upgrade_city: 1800,
   build_road: 1500,
   event: 2200,
+  event_card: 4000,
   turn_end: 800,
   // AI quiz: 1.5s thinking + 1.5s answer reveal + 1.5s result = 4500ms
   ai_quiz: 4500,

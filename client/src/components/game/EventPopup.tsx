@@ -388,84 +388,12 @@ function CardFront({ isPositive, currentEvent, preview, handleEvent }: {
 }
 
 export default function EventPopup() {
-  const { currentEvent, phase, handleEvent, resourcePickMode, eventEffectPreview } = useGameStore();
-  const [isFlipped, setIsFlipped] = useState(false);
+  const { resourcePickMode } = useGameStore();
 
-  // Reset flip state when event changes
-  const [lastEventId, setLastEventId] = useState<string | null>(null);
-  if (currentEvent && currentEvent.id !== lastEventId) {
-    setLastEventId(currentEvent.id);
-    setIsFlipped(false);
-  }
-
-  // Show resource picker if active
+  // The card-flip display is now handled by <EventCardDisplay />.
+  // EventPopup only remains responsible for the ResourcePicker UI.
   if (resourcePickMode) {
     return <ResourcePicker />;
   }
-
-  if (!currentEvent || phase !== 'event') return null;
-
-  const isPositive = currentEvent.category === 'positive';
-
-  return (
-    <AnimatePresence>
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        className="fixed inset-0 z-50 flex items-center justify-center p-6"
-        style={{ background: 'rgba(0,0,0,0.65)', perspective: '1200px' }}
-      >
-        {/* Background glow */}
-        <AnimatePresence>
-          {isFlipped && (
-            <motion.div
-              initial={{ opacity: 0, scale: 0.5 }}
-              animate={{ opacity: 0.4, scale: 1.3 }}
-              transition={{ duration: 0.6 }}
-              className="absolute rounded-full blur-3xl"
-              style={{
-                width: 300,
-                height: 300,
-                background: isPositive
-                  ? 'radial-gradient(circle, #FFD70080, #27AE6040, transparent)'
-                  : 'radial-gradient(circle, #E74C3C60, transparent)',
-              }}
-            />
-          )}
-        </AnimatePresence>
-
-        {/* 3D Flip container */}
-        <motion.div
-          animate={{ rotateY: isFlipped ? 180 : 0 }}
-          transition={{ duration: 0.6, ease: [0.4, 0, 0.2, 1] }}
-          style={{ transformStyle: 'preserve-3d', width: '100%', maxWidth: '24rem' }}
-        >
-          {/* Back face (visible when not flipped) */}
-          <div style={{ backfaceVisibility: 'hidden' }}>
-            {!isFlipped && <CardBack onFlip={() => setIsFlipped(true)} />}
-          </div>
-
-          {/* Front face (visible when flipped - rotated 180 to counter parent rotation) */}
-          <div style={{
-            backfaceVisibility: 'hidden',
-            transform: 'rotateY(180deg)',
-            position: isFlipped ? 'relative' : 'absolute',
-            top: 0,
-            left: 0,
-            width: '100%',
-          }}>
-            {isFlipped && (
-              <CardFront
-                isPositive={isPositive}
-                currentEvent={currentEvent}
-                preview={eventEffectPreview}
-                handleEvent={handleEvent}
-              />
-            )}
-          </div>
-        </motion.div>
-      </motion.div>
-    </AnimatePresence>
-  );
+  return null;
 }
