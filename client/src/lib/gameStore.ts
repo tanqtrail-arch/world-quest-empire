@@ -694,6 +694,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
     const state = get();
     const diceTotal = state.diceResult ? state.diceResult[0] + state.diceResult[1] : 0;
 
+    // 7 → quiz only (no event card)
     if (diceTotal === 7) {
       const quizPool = QUIZ_QUESTIONS.filter(q => q.difficulty === state.quizDifficulty);
       if (quizPool.length === 0) {
@@ -713,13 +714,34 @@ export const useGameStore = create<GameStore>((set, get) => ({
         turnTimerPausedForQuiz: true,
         quizTotalCount: state.quizTotalCount + 1,
       });
-    } else {
+      return;
+    }
+
+    // 2 or 12 → draw an event card (rarest rolls)
+    if (diceTotal === 2 || diceTotal === 12) {
+      const drawn = EVENT_CARDS[Math.floor(Math.random() * EVENT_CARDS.length)];
+      const card: EventCard = { ...drawn, id: genId() };
+      const player = state.players[state.currentPlayerIndex];
       set({
         showResourceGains: false,
         highlightedTileIds: [],
         diceAnimationStep: 0 as 0 | 1 | 2 | 3 | 4,
+        phase: 'event',
+        currentEvent: card,
+        gameLog: [
+          ...state.gameLog,
+          generateGameLog(`🎴 運命のカード (出目${diceTotal}): ${card.icon} ${card.title}`, 'event', player.id),
+        ],
       });
+      return;
     }
+
+    // Normal roll (3-6, 8-11) → just close the popup
+    set({
+      showResourceGains: false,
+      highlightedTileIds: [],
+      diceAnimationStep: 0 as 0 | 1 | 2 | 3 | 4,
+    });
   },
 
   // =============================================
@@ -1177,21 +1199,13 @@ export const useGameStore = create<GameStore>((set, get) => ({
   },
 
   dismissQuiz: () => {
-    const state = get();
-    // After quiz on a 7 roll, draw an event card.
-    const drawn = EVENT_CARDS[Math.floor(Math.random() * EVENT_CARDS.length)];
-    const card: EventCard = { ...drawn, id: genId() };
+    // Quiz is now standalone (event cards trigger on 2/12, not 7).
     set({
-      phase: 'event',
+      phase: 'action',
       currentQuiz: null,
       quizResult: null,
       quizResourcePickRemaining: 0,
       turnTimerPausedForQuiz: false,
-      currentEvent: card,
-      gameLog: [
-        ...state.gameLog,
-        generateGameLog(`🎴 運命のカード: ${card.icon} ${card.title}`, 'event', state.players[state.currentPlayerIndex].id),
-      ],
     });
   },
 
@@ -1417,54 +1431,6 @@ export const useGameStore = create<GameStore>((set, get) => ({
               eventDetail: lossText,
             });
           }
-
-          // ----- AI draws an event card -----
-          const drawn = EVENT_CARDS[Math.floor(Math.random() * EVENT_CARDS.length)];
-          const aiCard: EventCard = { ...drawn, id: genId() };
-          const aiCtx: EffectContext = {
-            players: simPlayers,
-            currentPlayerId: aiP.id,
-            settlements: simSettlements,
-            roads: simRoads,
-            edges: state.edges.map(e => ({ id: e.id, v1: e.vertexIds[0], v2: e.vertexIds[1] })),
-            vertices: state.vertices.map(v => ({ id: v.id, x: v.x, y: v.y })),
-          };
-          const aiResult = applyEventEffect(aiCard, aiCtx);
-          // Apply result to sim (AI cannot pick — skip requiresChoice cards gracefully)
-          if (aiResult.players) {
-            // Copy back to simPlayers
-            aiResult.players.forEach(np => {
-              const p = simPlayers.find(pp => pp.id === np.id);
-              if (p) {
-                p.resources = { ...np.resources };
-                p.victoryPoints = np.victoryPoints;
-              }
-            });
-          }
-          if (aiResult.settlements) {
-            simSettlements.length = 0;
-            aiResult.settlements.forEach(s => simSettlements.push(s));
-          }
-          if (aiResult.roads) {
-            simRoads.length = 0;
-            aiResult.roads.forEach(r => simRoads.push(r));
-          }
-          // For requiresChoice cards, give AI some free resources (2 best)
-          if (aiResult.requiresChoice === 'pick_resource' && aiResult.choiceCount) {
-            const sorted = [...allRes].sort((a, b) => aiP.resources[a] - aiP.resources[b]);
-            for (let i = 0; i < aiResult.choiceCount; i++) {
-              aiP.resources[sorted[i % sorted.length]] += 1;
-            }
-          }
-          logs.push(generateGameLog(`🎴 ${aiP.name} 運命のカード: ${aiCard.icon} ${aiCard.title}`, 'event', aiP.id));
-          aiActions.push({
-            type: 'event_card',
-            playerId: aiP.id,
-            playerName: aiP.countryName,
-            playerFlag: aiP.flagEmoji,
-            playerColor: aiP.color,
-            eventCard: aiCard,
-          });
         } else {
           // Normal dice: distribute from tiles
           const gains = distributeResourcesWithVertices(
@@ -1527,6 +1493,55 @@ export const useGameStore = create<GameStore>((set, get) => ({
               diceTotal: total,
             });
           }
+        }
+
+        // ----- 2 or 12 → draw an event card and apply to all sim players -----
+        if (total === 2 || total === 12) {
+          const drawn = EVENT_CARDS[Math.floor(Math.random() * EVENT_CARDS.length)];
+          const aiCard: EventCard = { ...drawn, id: genId() };
+          const aiCtx: EffectContext = {
+            players: simPlayers,
+            currentPlayerId: aiP.id,
+            settlements: simSettlements,
+            roads: simRoads,
+            edges: state.edges.map(e => ({ id: e.id, v1: e.vertexIds[0], v2: e.vertexIds[1] })),
+            vertices: state.vertices.map(v => ({ id: v.id, x: v.x, y: v.y })),
+          };
+          const aiResult = applyEventEffect(aiCard, aiCtx);
+          if (aiResult.players) {
+            aiResult.players.forEach(np => {
+              const p = simPlayers.find(pp => pp.id === np.id);
+              if (p) {
+                p.resources = { ...np.resources };
+                p.victoryPoints = np.victoryPoints;
+              }
+            });
+          }
+          if (aiResult.settlements) {
+            simSettlements.length = 0;
+            aiResult.settlements.forEach(s => simSettlements.push(s));
+          }
+          if (aiResult.roads) {
+            simRoads.length = 0;
+            aiResult.roads.forEach(r => simRoads.push(r));
+          }
+          // For requiresChoice cards, give the AI extra random resources
+          if (aiResult.requiresChoice === 'pick_resource' && aiResult.choiceCount) {
+            const cardAllRes: ResourceType[] = ['rubber', 'oil', 'gold', 'food'];
+            const sorted = [...cardAllRes].sort((a, b) => aiP.resources[a] - aiP.resources[b]);
+            for (let i = 0; i < aiResult.choiceCount; i++) {
+              aiP.resources[sorted[i % sorted.length]] += 1;
+            }
+          }
+          logs.push(generateGameLog(`🎴 運命のカード (出目${total}): ${aiCard.icon} ${aiCard.title}`, 'event', aiP.id));
+          aiActions.push({
+            type: 'event_card',
+            playerId: aiP.id,
+            playerName: aiP.countryName,
+            playerFlag: aiP.flagEmoji,
+            playerColor: aiP.color,
+            eventCard: aiCard,
+          });
         }
 
         // AI build actions

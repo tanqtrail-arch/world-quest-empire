@@ -89,7 +89,10 @@ function EventCardDisplayHost() {
 
 // Handoff screen for local multiplayer
 function HandoffOverlay() {
-  const { phase, players, handoffPlayerIndex, confirmHandoff } = useGameStore();
+  const phase = useGameStore(s => s.phase);
+  const players = useGameStore(s => s.players);
+  const handoffPlayerIndex = useGameStore(s => s.handoffPlayerIndex);
+  const confirmHandoff = useGameStore(s => s.confirmHandoff);
 
   if (phase !== 'handoff' || handoffPlayerIndex === null) return null;
 
@@ -136,7 +139,11 @@ function HandoffOverlay() {
 
 /* ---- Turn Timer Display ---- */
 function TurnTimerDisplay() {
-  const { turnTimeRemaining, turnTimerActive, timerEnabled, isPlayingAI, phase } = useGameStore();
+  const turnTimeRemaining = useGameStore(s => s.turnTimeRemaining);
+  const turnTimerActive = useGameStore(s => s.turnTimerActive);
+  const timerEnabled = useGameStore(s => s.timerEnabled);
+  const isPlayingAI = useGameStore(s => s.isPlayingAI);
+  const phase = useGameStore(s => s.phase);
   const tickTurnTimer = useGameStore(s => s.tickTurnTimer);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -195,7 +202,11 @@ function TurnTimerDisplay() {
 }
 
 export default function GameScreen() {
-  const { phase, isPlayingAI, currentAIAction, setupPhase, players } = useGameStore();
+  const phase = useGameStore(s => s.phase);
+  const isPlayingAI = useGameStore(s => s.isPlayingAI);
+  const currentAIAction = useGameStore(s => s.currentAIAction);
+  const setupPhase = useGameStore(s => s.setupPhase);
+  const players = useGameStore(s => s.players);
   const [showHelp, setShowHelp] = useState(false);
 
   const isSetup = phase === 'setup';
