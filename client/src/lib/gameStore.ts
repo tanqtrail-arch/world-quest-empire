@@ -21,6 +21,16 @@ import {
   type AITurnAction,
 } from './gameLogic';
 
+// Module-level timer registry for dice animation steps. Prevents leaks when
+// doRollDice is invoked again before the previous staged sequence finishes.
+const diceAnimationTimers: ReturnType<typeof setTimeout>[] = [];
+function clearDiceAnimationTimers() {
+  while (diceAnimationTimers.length > 0) {
+    const t = diceAnimationTimers.pop();
+    if (t) clearTimeout(t);
+  }
+}
+
 // --- AI Action Types ---
 export interface AIAction {
   type: 'turn_start' | 'dice_roll' | 'resource_gain' | 'dice_gains' | 'lucky_seven' | 'no_resource' | 'build_road' | 'build_settlement' | 'upgrade_city' | 'event' | 'event_card' | 'turn_end' | 'ai_quiz';
@@ -520,6 +530,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
   doRollDice: () => {
     const state = get();
     if (state.phase !== 'rolling') return;
+    clearDiceAnimationTimers();
 
     const dice = rollDice();
     const total = dice[0] + dice[1];
@@ -599,25 +610,24 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
     if (total === 7) {
       // Lucky 7: skip tile highlight/flag steps, go straight to resource summary
-      // After dismissing resource gains, quiz will be triggered
-      setTimeout(() => {
+      diceAnimationTimers.push(setTimeout(() => {
         set({ diceAnimationStep: 4 as 0 | 1 | 2 | 3 | 4, showResourceGains: true });
-      }, 500);
+      }, 500));
     } else {
       // Step 2: Tile highlight (after 500ms)
-      setTimeout(() => {
+      diceAnimationTimers.push(setTimeout(() => {
         set({ diceAnimationStep: 2 as 0 | 1 | 2 | 3 | 4, highlightedTileIds: matchingTileIds });
-      }, 500);
+      }, 500));
 
       // Step 3: Flag bounce on settlements (after 1000ms)
-      setTimeout(() => {
+      diceAnimationTimers.push(setTimeout(() => {
         set({ diceAnimationStep: 3 as 0 | 1 | 2 | 3 | 4 });
-      }, 1000);
+      }, 1000));
 
       // Step 4: Resource summary screen (after 1500ms)
-      setTimeout(() => {
+      diceAnimationTimers.push(setTimeout(() => {
         set({ diceAnimationStep: 4 as 0 | 1 | 2 | 3 | 4, showResourceGains: true });
-      }, 1500);
+      }, 1500));
     }
   },
 
@@ -628,6 +638,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
     const state = get();
     if (state.phase !== 'rolling') return;
     if (state.usedGoldDice) return;
+    clearDiceAnimationTimers();
     const player = state.players[state.currentPlayerIndex];
     if (player.resources.gold < 4) return;
 
@@ -682,15 +693,16 @@ export const useGameStore = create<GameStore>((set, get) => ({
       players: updatedPlayers,
     });
 
-    setTimeout(() => {
+    diceAnimationTimers.push(setTimeout(() => {
       set({ diceAnimationStep: 4 as 0 | 1 | 2 | 3 | 4, showResourceGains: true });
-    }, 500);
+    }, 500));
   },
 
   // =============================================
   // DISMISS RESOURCE GAINS
   // =============================================
   dismissResourceGains: () => {
+    clearDiceAnimationTimers();
     const state = get();
     const diceTotal = state.diceResult ? state.diceResult[0] + state.diceResult[1] : 0;
 
@@ -1230,6 +1242,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
   // END TURN (handles AI turns and local multiplayer handoff)
   // =============================================
   doEndTurn: () => {
+    clearDiceAnimationTimers();
     const state = get();
 
     // Track "came from behind" badge: if any human ends a turn in last place,

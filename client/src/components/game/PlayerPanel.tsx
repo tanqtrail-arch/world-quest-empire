@@ -4,14 +4,15 @@
  * ローカル対戦では現在のターンのプレイヤーを表示
  * 資源が変化した時にパルスアニメーションを表示
  */
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, memo } from 'react';
 import { useGameStore } from '@/lib/gameStore';
 import { RESOURCE_INFO, type ResourceType } from '@/lib/gameTypes';
 import { motion, AnimatePresence } from 'framer-motion';
 
 const resourceOrder: ResourceType[] = ['rubber', 'oil', 'gold', 'food'];
 
-export default function PlayerPanel() {
+function PlayerPanel() {
+  console.count('[render] PlayerPanel');
   const players = useGameStore(s => s.players);
   const currentPlayerIndex = useGameStore(s => s.currentPlayerIndex);
   const currentTurn = useGameStore(s => s.currentTurn);
@@ -153,15 +154,13 @@ export default function PlayerPanel() {
                 <span>{info.icon}</span>
                 <span>{info.name}</span>
               </div>
-              <motion.div
+              <div
                 key={`${res}-${count}`}
-                initial={isChanged ? { scale: 1.5, color: '#FFD700' } : {}}
-                animate={{ scale: 1, color: '#ffffff' }}
-                transition={{ duration: 0.4 }}
-                className="font-score text-2xl md:text-3xl font-bold text-white drop-shadow-md"
+                className={`font-score text-2xl md:text-3xl font-bold text-white drop-shadow-md resource-num ${isChanged ? 'pulse-num' : ''}`}
+                style={isChanged ? { color: '#FFD700' } : { color: '#ffffff' }}
               >
                 {count}
-              </motion.div>
+              </div>
             </motion.div>
           );
         })}
@@ -169,3 +168,5 @@ export default function PlayerPanel() {
     </div>
   );
 }
+
+export default memo(PlayerPanel);

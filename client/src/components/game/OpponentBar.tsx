@@ -4,7 +4,7 @@
  * AIターン中は行動中のプレイヤーをハイライト表示
  * 資源獲得時にポップアップアニメーション表示
  */
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, memo } from 'react';
 import { useGameStore } from '@/lib/gameStore';
 import { RESOURCE_INFO, type ResourceType } from '@/lib/gameTypes';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -18,8 +18,14 @@ interface ResourcePopupItem {
   amount: number;
 }
 
-export default function OpponentBar() {
-  const { players, currentPlayerIndex, isPlayingAI, currentAIAction, resourceGains, showResourceGains } = useGameStore();
+function OpponentBar() {
+  console.count('[render] OpponentBar');
+  const players = useGameStore(s => s.players);
+  const currentPlayerIndex = useGameStore(s => s.currentPlayerIndex);
+  const isPlayingAI = useGameStore(s => s.isPlayingAI);
+  const currentAIAction = useGameStore(s => s.currentAIAction);
+  const resourceGains = useGameStore(s => s.resourceGains);
+  const showResourceGains = useGameStore(s => s.showResourceGains);
   const currentPlayer = players[currentPlayerIndex];
   const [popups, setPopups] = useState<ResourcePopupItem[]>([]);
 
@@ -147,18 +153,13 @@ export default function OpponentBar() {
                   {resourceOrder.map(res => {
                     const isResChanged = playerChanged.has(res);
                     return (
-                      <motion.span
-                        key={res}
-                        animate={isResChanged ? {
-                          scale: [1, 1.5, 1.2, 1],
-                          color: ['#ffffff99', '#FFD700', '#FFEE58', '#ffffff99'],
-                          textShadow: ['none', '0 0 8px #FFD700', '0 0 4px #FFD700', 'none'],
-                        } : {}}
-                        transition={{ duration: 0.8 }}
-                        className="inline-block"
+                      <span
+                        key={`${res}-${opp.resources[res]}`}
+                        className={`inline-block resource-num ${isResChanged ? 'pulse-num' : ''}`}
+                        style={isResChanged ? { color: '#FFD700', textShadow: '0 0 6px #FFD70080' } : undefined}
                       >
                         {RESOURCE_INFO[res].icon}{opp.resources[res]}
-                      </motion.span>
+                      </span>
                     );
                   })}
                 </span>
@@ -200,3 +201,5 @@ export default function OpponentBar() {
     </div>
   );
 }
+
+export default memo(OpponentBar);

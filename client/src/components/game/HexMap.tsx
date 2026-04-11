@@ -38,16 +38,16 @@ function DiceResultZoom({ diceTotal, players, resourceGains, playerColors, playe
   return (
     <motion.div
       initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
+      animate={{ opacity: 1, transition: { duration: 0.3, ease: 'easeOut' } }}
+      exit={{ opacity: 0, transition: { duration: 0.2, ease: 'easeIn' } }}
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
       onClick={onClose}
     >
       <motion.div
-        initial={{ scale: 0.7, y: 40 }}
-        animate={{ scale: 1, y: 0 }}
-        exit={{ scale: 0.7, y: 40 }}
-        transition={{ type: 'spring', damping: 20 }}
+        initial={{ scale: 0.8, opacity: 0 }}
+        animate={{ scale: 1, opacity: 1 }}
+        exit={{ scale: 0.85, opacity: 0 }}
+        transition={{ type: 'spring', stiffness: 320, damping: 24, duration: 0.3 }}
         className="bg-gradient-to-b from-amber-50 to-orange-50 rounded-2xl p-5 shadow-2xl border-2 border-amber-300 max-w-sm w-full"
         onClick={(e: React.MouseEvent) => e.stopPropagation()}
       >
@@ -180,7 +180,7 @@ const HexTile = memo(function HexTile({ tile, cx, cy, isHighlighted, isDimmed }:
           ? 'drop-shadow(0 0 16px rgba(255, 215, 0, 1))'
           : 'drop-shadow(0 3px 4px rgba(0,0,0,0.35))',
         opacity: isDimmed ? 0.3 : 1,
-        transition: 'opacity 0.3s ease',
+        transition: 'opacity 0.4s ease, filter 0.4s ease',
       }}
     >
       <defs>
@@ -436,6 +436,7 @@ const RoadsLayer = memo(function RoadsLayer({
         return (
           <line
             key={road.edgeId}
+            className="draw-road"
             x1={edge.x1} y1={edge.y1}
             x2={edge.x2} y2={edge.y2}
             stroke={color}
@@ -444,7 +445,7 @@ const RoadsLayer = memo(function RoadsLayer({
             style={{
               filter: 'drop-shadow(0 1px 2px rgba(0,0,0,0.5))',
               opacity: shouldDimTiles ? 0.4 : 1,
-              transition: 'opacity 0.3s ease',
+              transition: 'opacity 0.4s ease',
             }}
           />
         );
@@ -479,7 +480,7 @@ const SettlementsLayer = memo(function SettlementsLayer({
         const dimOpacity = shouldDimTiles && !isBouncing ? 0.3 : 1;
 
         return (
-          <g key={settlement.vertexId}>
+          <g key={settlement.vertexId} className={isBouncing ? 'bounce-flag' : undefined}>
             <circle cx={fxB} cy={fyB} r={flagR}
               fill={pColor} stroke="white" strokeWidth={3}
               style={{
@@ -487,24 +488,20 @@ const SettlementsLayer = memo(function SettlementsLayer({
                   ? 'drop-shadow(0 0 10px rgba(255,215,0,0.95)) drop-shadow(0 2px 4px rgba(0,0,0,0.8))'
                   : 'drop-shadow(0 0 3px rgba(0,0,0,0.8)) drop-shadow(0 2px 4px rgba(0,0,0,0.6))',
                 opacity: dimOpacity,
-                transition: 'opacity 0.3s ease',
+                transition: 'opacity 0.4s ease, filter 0.4s ease',
               }}
-            >
-              {isBouncing && (
-                <animate attributeName="r" values={`${flagR};${flagR + 5};${flagR}`} dur="0.5s" repeatCount="1" fill="freeze" />
-              )}
-            </circle>
+            />
             {isCity && (
               <circle cx={fxB} cy={fyB} r={flagR + 2}
                 fill="none" stroke="#FFD700" strokeWidth={2}
-                style={{ opacity: dimOpacity, transition: 'opacity 0.3s ease' }}
+                style={{ opacity: dimOpacity, transition: 'opacity 0.4s ease' }}
               />
             )}
             <text x={fxB} y={fyB + 1}
               textAnchor="middle" dominantBaseline="middle"
               fontSize={isBouncing ? (isCity ? 16 : 15) : (isCity ? 14 : 13)}
               className="select-none pointer-events-none"
-              style={{ opacity: dimOpacity, transition: 'opacity 0.3s ease, font-size 0.3s ease' }}
+              style={{ opacity: dimOpacity, transition: 'opacity 0.4s ease, font-size 0.3s ease' }}
             >
               {pFlag}
             </text>
@@ -512,7 +509,7 @@ const SettlementsLayer = memo(function SettlementsLayer({
               <text x={fxB + flagR} y={fyB - flagR}
                 textAnchor="middle" dominantBaseline="middle"
                 fontSize={11} className="select-none pointer-events-none"
-                style={{ opacity: dimOpacity, transition: 'opacity 0.3s ease' }}
+                style={{ opacity: dimOpacity, transition: 'opacity 0.4s ease' }}
               >
                 👑
               </text>
@@ -610,7 +607,8 @@ const InteractiveVerticesLayer = memo(function InteractiveVerticesLayer({
 });
 
 // --- Main HexMap Component ---
-export default function HexMap() {
+function HexMap() {
+  console.count('[render] HexMap');
   // Narrow selectors — each subscribes only to a single slice so unrelated
   // store updates (e.g. game log entries) do not re-render the map.
   const tiles = useGameStore(s => s.tiles);
@@ -835,3 +833,5 @@ export default function HexMap() {
     </div>
   );
 }
+
+export default memo(HexMap);

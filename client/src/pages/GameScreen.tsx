@@ -68,6 +68,7 @@ function TileHelpTooltip({ onClose }: { onClose: () => void }) {
 
 // Event card 3D flip host — shows human's drawn card (phase==='event') or AI's drawn card
 function EventCardDisplayHost() {
+  console.count('[render] EventCardDisplayHost');
   const phase = useGameStore(s => s.phase);
   const currentEvent = useGameStore(s => s.currentEvent);
   const currentAIAction = useGameStore(s => s.currentAIAction);
@@ -202,6 +203,7 @@ function TurnTimerDisplay() {
 }
 
 export default function GameScreen() {
+  console.count('[render] GameScreen');
   const phase = useGameStore(s => s.phase);
   const isPlayingAI = useGameStore(s => s.isPlayingAI);
   const currentAIAction = useGameStore(s => s.currentAIAction);

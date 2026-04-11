@@ -358,8 +358,9 @@ function AIQuizView() {
   );
 }
 
-/* ---- Main Quiz Popup ---- */
-export default function QuizPopup() {
+/* ---- Main Quiz Popup (inner — only mounted when visible) ---- */
+function QuizPopupInner() {
+  console.count('[render] QuizPopupInner');
   const phase = useGameStore(s => s.phase);
   const currentQuiz = useGameStore(s => s.currentQuiz);
   const quizResult = useGameStore(s => s.quizResult);
@@ -685,4 +686,14 @@ export default function QuizPopup() {
       </motion.div>
     </AnimatePresence>
   );
+}
+
+/* ---- Gate wrapper: only mounts QuizPopupInner when visible ---- */
+export default function QuizPopup() {
+  console.count('[render] QuizPopup gate');
+  const phase = useGameStore(s => s.phase);
+  const aiActionType = useGameStore(s => s.currentAIAction?.type);
+  const isVisible = phase === 'quiz' || aiActionType === 'ai_quiz';
+  if (!isVisible) return null;
+  return <QuizPopupInner />;
 }

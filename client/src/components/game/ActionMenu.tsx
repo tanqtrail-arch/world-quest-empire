@@ -9,16 +9,26 @@ import { useGameStore } from '@/lib/gameStore';
 import { BUILD_COSTS, RESOURCE_INFO, type ResourceType } from '@/lib/gameTypes';
 import { canAfford, getUpgradeableVertices, getValidSettlementVertices, getValidRoadEdges, getTradeRate } from '@/lib/gameLogic';
 import { motion, AnimatePresence } from 'framer-motion';
-import { useState } from 'react';
+import { useState, memo } from 'react';
 import { Hammer, ArrowRightLeft, SkipForward, X, Check } from 'lucide-react';
 
-export default function ActionMenu() {
-  const {
-    phase, players, currentPlayerIndex, doEndTurn,
-    buildMode, startBuild, cancelBuild, confirmBuild,
-    selectedVertexId, selectedEdgeId,
-    vertices, edges, settlements, roads, difficulty,
-  } = useGameStore();
+function ActionMenu() {
+  console.count('[render] ActionMenu');
+  const phase = useGameStore(s => s.phase);
+  const players = useGameStore(s => s.players);
+  const currentPlayerIndex = useGameStore(s => s.currentPlayerIndex);
+  const doEndTurn = useGameStore(s => s.doEndTurn);
+  const buildMode = useGameStore(s => s.buildMode);
+  const startBuild = useGameStore(s => s.startBuild);
+  const cancelBuild = useGameStore(s => s.cancelBuild);
+  const confirmBuild = useGameStore(s => s.confirmBuild);
+  const selectedVertexId = useGameStore(s => s.selectedVertexId);
+  const selectedEdgeId = useGameStore(s => s.selectedEdgeId);
+  const vertices = useGameStore(s => s.vertices);
+  const edges = useGameStore(s => s.edges);
+  const settlements = useGameStore(s => s.settlements);
+  const roads = useGameStore(s => s.roads);
+  const difficulty = useGameStore(s => s.difficulty);
   const [showBuild, setShowBuild] = useState(false);
   const [showTrade, setShowTrade] = useState(false);
 
@@ -270,7 +280,11 @@ function BuildOption({ label, cost, points, enabled, disabledReason, description
 }
 
 function TradePanel({ onClose }: { onClose: () => void }) {
-  const { players, currentPlayerIndex, doTrade, settlements, ports } = useGameStore();
+  const players = useGameStore(s => s.players);
+  const currentPlayerIndex = useGameStore(s => s.currentPlayerIndex);
+  const doTrade = useGameStore(s => s.doTrade);
+  const settlements = useGameStore(s => s.settlements);
+  const ports = useGameStore(s => s.ports);
   const player = players[currentPlayerIndex];
   const resources: ResourceType[] = ['rubber', 'oil', 'gold', 'food'];
   const [giveRes, setGiveRes] = useState<ResourceType | null>(null);
@@ -361,3 +375,5 @@ function TradePanel({ onClose }: { onClose: () => void }) {
     </div>
   );
 }
+
+export default memo(ActionMenu);
