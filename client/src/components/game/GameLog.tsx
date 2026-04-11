@@ -50,7 +50,7 @@ export default function GameLog() {
   return (
     <div
       ref={scrollRef}
-      className="h-20 md:h-32 md:flex-1 overflow-y-auto px-3 py-1.5 rounded-lg mx-2 md:mx-0"
+      className="h-20 overflow-y-auto px-3 py-1.5 rounded-lg mx-2"
       style={{
         background: 'rgba(0,0,0,0.55)',
         backdropFilter: 'blur(4px)',
@@ -66,7 +66,7 @@ export default function GameLog() {
             initial={isNew ? { opacity: 0, x: -10 } : false}
             animate={{ opacity: 1, x: 0 }}
             transition={{ duration: 0.3 }}
-            className={`text-[11px] md:text-xs leading-snug flex items-start gap-1 ${typeColors[log.type] || 'text-white/80'}`}
+            className={`text-[11px] leading-snug flex items-start gap-1 ${typeColors[log.type] || 'text-white/80'}`}
           >
             <span className="shrink-0 text-[10px]">{typeIcons[log.type] || '•'}</span>
             {playerColor && (

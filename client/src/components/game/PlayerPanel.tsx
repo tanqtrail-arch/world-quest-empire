@@ -55,7 +55,7 @@ export default function PlayerPanel() {
 
   return (
     <div
-      className="rounded-t-2xl md:rounded-2xl px-3 md:px-4 py-2 md:py-3 shadow-[0_-4px_20px_rgba(0,0,0,0.3)]"
+      className="rounded-t-2xl px-3 py-2 shadow-[0_-4px_20px_rgba(0,0,0,0.3)]"
       style={{
         background: 'linear-gradient(180deg, #8B6914 0%, #6B4E12 50%, #5A3E0E 100%)',
         borderTop: `3px solid ${player.color}`,
@@ -110,7 +110,7 @@ export default function PlayerPanel() {
       </div>
 
       {/* Resources Row */}
-      <div className="grid grid-cols-4 gap-1.5 md:gap-2.5">
+      <div className="grid grid-cols-4 gap-1.5">
         {resourceOrder.map(res => {
           const info = RESOURCE_INFO[res];
           const count = player.resources[res];
@@ -149,7 +149,7 @@ export default function PlayerPanel() {
                 )}
               </AnimatePresence>
 
-              <div className="text-white text-xs md:text-sm font-heading flex items-center justify-center gap-0.5">
+              <div className="text-white text-xs font-heading flex items-center justify-center gap-0.5">
                 <span>{info.icon}</span>
                 <span>{info.name}</span>
               </div>
@@ -158,7 +158,7 @@ export default function PlayerPanel() {
                 initial={isChanged ? { scale: 1.5, color: '#FFD700' } : {}}
                 animate={{ scale: 1, color: '#ffffff' }}
                 transition={{ duration: 0.4 }}
-                className="font-score text-2xl md:text-3xl font-bold text-white drop-shadow-md"
+                className="font-score text-2xl font-bold text-white drop-shadow-md"
               >
                 {count}
               </motion.div>

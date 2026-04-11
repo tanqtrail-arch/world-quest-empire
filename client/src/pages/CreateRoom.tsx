@@ -7,11 +7,11 @@
  */
 import { useState } from 'react';
 import { useGameStore } from '@/lib/gameStore';
-import { PLAYER_COLORS, QUIZ_DIFFICULTY_INFO, type Difficulty, type PlayerSlot, type QuizDifficulty } from '@/lib/gameTypes';
+import { PLAYER_COLORS, type Difficulty, type PlayerSlot } from '@/lib/gameTypes';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ArrowLeft, Bot, User, Plus, Minus } from 'lucide-react';
 
-const WOOD_BG = '/wood-texture.webp';
+const WOOD_BG = 'https://d2xsxph8kpxj0f.cloudfront.net/310519663286960690/RthryRhRZNJvzXLKUFJiBd/wood-texture-3bU4G8nuC3Js3NFmH6shph.webp';
 
 const DEFAULT_SLOTS: PlayerSlot[] = [
   { type: 'human', name: '', countryIndex: 0 },
@@ -23,8 +23,6 @@ export default function CreateRoom() {
   const { setScreen, initGame } = useGameStore();
   const [slots, setSlots] = useState<PlayerSlot[]>(DEFAULT_SLOTS);
   const [difficulty, setDifficulty] = useState<Difficulty>('normal');
-  const [quizDifficulty, setQuizDifficulty] = useState<QuizDifficulty>('elementary_high');
-  const [timerEnabled, setTimerEnabled] = useState(true);
 
   const handleStart = () => {
     // Fill in default names
@@ -32,7 +30,7 @@ export default function CreateRoom() {
       ...slot,
       name: slot.name.trim() || (slot.type === 'ai' ? `AI ${PLAYER_COLORS[slot.countryIndex].countryName}` : `プレイヤー${i + 1}`),
     }));
-    initGame(finalSlots, difficulty, quizDifficulty, timerEnabled);
+    initGame(finalSlots, difficulty);
   };
 
   const toggleSlotType = (index: number) => {
@@ -72,9 +70,9 @@ export default function CreateRoom() {
   };
 
   const difficultyOptions: { value: Difficulty; label: string; desc: string; color: string }[] = [
-    { value: 'easy', label: 'よわい', desc: 'のんびりプレイ。はじめてでも安心！', color: '#2ECC71' },
-    { value: 'normal', label: 'ふつう', desc: 'バランスの良い対戦。おすすめ！', color: '#3498DB' },
-    { value: 'hard', label: 'つよい', desc: '本気モード。勝てるかな？', color: '#E74C3C' },
+    { value: 'easy', label: 'かんたん', desc: 'イベント少なめ', color: '#2ECC71' },
+    { value: 'normal', label: 'ふつう', desc: '標準ルール', color: '#3498DB' },
+    { value: 'hard', label: 'むずかしい', desc: 'イベント多め', color: '#E74C3C' },
   ];
 
   const usedCountries = new Set(slots.map(s => s.countryIndex));
@@ -92,7 +90,7 @@ export default function CreateRoom() {
         initial={{ scale: 0.9, opacity: 0 }}
         animate={{ scale: 1, opacity: 1 }}
         transition={{ duration: 0.4 }}
-        className="parchment rounded-2xl p-5 w-full max-w-md md:max-w-lg"
+        className="parchment rounded-2xl p-5 w-full max-w-md"
       >
         {/* Back button */}
         <button
@@ -241,67 +239,6 @@ export default function CreateRoom() {
               </button>
             ))}
           </div>
-        </div>
-
-        {/* Quiz Difficulty */}
-        <div className="mb-4">
-          <label className="block font-heading font-bold text-amber-800 mb-1.5 text-base">
-            📜 クイズレベル
-          </label>
-          <div className="flex gap-2">
-            {(Object.entries(QUIZ_DIFFICULTY_INFO) as [QuizDifficulty, typeof QUIZ_DIFFICULTY_INFO[QuizDifficulty]][]).map(([key, info]) => (
-              <button
-                key={key}
-                onClick={() => setQuizDifficulty(key)}
-                className={`flex-1 py-2.5 px-2 rounded-xl font-heading font-bold transition-all ${
-                  quizDifficulty === key
-                    ? 'text-white shadow-lg scale-105 border-3'
-                    : 'bg-white text-amber-800 border-3 border-amber-300 hover:border-amber-500'
-                }`}
-                style={
-                  quizDifficulty === key
-                    ? { backgroundColor: info.color, borderColor: info.color }
-                    : undefined
-                }
-              >
-                <div className="text-sm sm:text-base">{info.icon} {info.label}</div>
-                <div className="text-xs mt-0.5 opacity-80">{info.desc}</div>
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Timer Toggle */}
-        <div className="mb-4">
-          <div className="flex items-center justify-between">
-            <label className="font-heading font-bold text-amber-800 text-base">
-              ⏱️ 制限時間（60秒/ターン）
-            </label>
-            <button
-              onClick={() => setTimerEnabled(!timerEnabled)}
-              className={`relative w-14 h-7 rounded-full transition-colors ${
-                timerEnabled ? 'bg-blue-500' : 'bg-gray-300'
-              }`}
-            >
-              <motion.div
-                animate={{ x: timerEnabled ? 26 : 2 }}
-                transition={{ type: 'spring', stiffness: 500, damping: 30 }}
-                className="absolute top-1 w-5 h-5 bg-white rounded-full shadow-md"
-              />
-            </button>
-          </div>
-          <p className="text-xs text-amber-700 mt-1">
-            {timerEnabled ? '授業モード: 各ターン60秒以内に行動しよう！' : '自由プレイ: 時間制限なし'}
-          </p>
-        </div>
-
-        {/* Rules hint */}
-        <div className="mb-4 parchment rounded-xl p-3 bg-amber-50/50">
-          <h3 className="font-heading font-bold text-amber-800 text-sm mb-1">⚓ 港 / 📜 クイズ</h3>
-          <p className="text-xs text-amber-700">
-            港に隣接する頂点に拠点を建てると交換レートがお得に！（通常4:1 → 港3:1 or 2:1）
-            サイコロで7が出ると歴史クイズが出題されるよ。正解で資源ボーナス、不正解でペナルティ！
-          </p>
         </div>
 
         {/* Start Button */}

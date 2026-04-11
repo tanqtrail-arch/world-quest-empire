@@ -2,16 +2,13 @@
 import {
   type GameTile, type Player, type Resources, type ResourceType, type TileType,
   type EventCard, type GameLogEntry, type Difficulty,
-  type Vertex, type Edge, type Settlement, type Road, type Port,
+  type Vertex, type Edge, type Settlement, type Road,
   HEX_LAYOUT, TILE_DISTRIBUTION, DICE_NUMBERS, EVENT_CARDS,
-  HEX_LAYOUT_LARGE, TILE_DISTRIBUTION_LARGE, DICE_NUMBERS_LARGE, ROWS_LARGE,
   BUILD_COSTS, VP_VALUES, WINNING_SCORE, PLAYER_COLORS,
-  TRADE_RATE_DEFAULT, TRADE_RATE_GENERAL_PORT, TRADE_RATE_SPECIAL_PORT,
 } from './gameTypes';
 import {
   HEX_SIZE, ROWS, COL_SPACING, ROW_SPACING,
   getTileCenter, getHexCorners, roundCoord, coordKey,
-  ROWS_LARGE as GEO_ROWS_LARGE,
 } from './hexGeometry';
 
 // --- Shuffle Array ---
@@ -35,15 +32,14 @@ export function genId(): string {
 // =============================================
 
 // Generate all vertices and edges from the hex grid
-export function generateVerticesAndEdges(tiles: GameTile[], rows?: number[]): { vertices: Vertex[]; edges: Edge[] } {
-  const mapRows = rows || ROWS;
+export function generateVerticesAndEdges(tiles: GameTile[]): { vertices: Vertex[]; edges: Edge[] } {
   // Map from coordinate key to vertex data
   const vertexMap = new Map<string, { x: number; y: number; tileIds: Set<number> }>();
   // Map from tile index to its corner coordinate keys
   const tileCornerKeys: string[][] = [];
 
   tiles.forEach((tile, tileIdx) => {
-    const center = getTileCenter(tileIdx, mapRows);
+    const center = getTileCenter(tileIdx);
     const corners = getHexCorners(center.x, center.y);
     const keys: string[] = [];
 
@@ -142,30 +138,28 @@ export function generateVerticesAndEdges(tiles: GameTile[], rows?: number[]): { 
 // MAP GENERATION
 // =============================================
 
-export function generateMap(playerCount: number = 3): GameTile[] {
-  const isLarge = playerCount >= 5;
-  const layout = isLarge ? HEX_LAYOUT_LARGE : HEX_LAYOUT;
-  const distribution = isLarge ? TILE_DISTRIBUTION_LARGE : TILE_DISTRIBUTION;
-  const diceNumbers = isLarge ? DICE_NUMBERS_LARGE : DICE_NUMBERS;
-  const centerIndex = isLarge ? 12 : 9; // center of 4-5-6-5-4 or 3-4-5-4-3
-
-  const resourceTypes = shuffle(distribution.filter(t => t !== 'desert'));
-  const shuffledNumbers = shuffle(diceNumbers);
+export function generateMap(): GameTile[] {
+  const shuffledTypes = shuffle(TILE_DISTRIBUTION);
+  const nonSpecialIndices: number[] = [];
+  shuffledTypes.forEach((t, i) => { if (t !== 'sea' && t !== 'desert') nonSpecialIndices.push(i); });
+  
+  const shuffledNumbers = shuffle(DICE_NUMBERS);
   let numIdx = 0;
-  let resIdx = 0;
 
-  return layout.map((pos, i) => {
-    if (i === centerIndex) {
-      return { id: i, type: 'desert' as TileType, diceNumber: 0, q: pos.q, r: pos.r };
+  return HEX_LAYOUT.map((pos, i) => {
+    const type = shuffledTypes[i] || 'sea';
+    let diceNumber = 0;
+    if (type !== 'sea' && type !== 'desert' && numIdx < shuffledNumbers.length) {
+      diceNumber = shuffledNumbers[numIdx++];
     }
-    const type = resourceTypes[resIdx++] || 'rubber';
-    const diceNumber = numIdx < shuffledNumbers.length ? shuffledNumbers[numIdx++] : 0;
-    return { id: i, type, diceNumber, q: pos.q, r: pos.r };
+    return {
+      id: i,
+      type,
+      diceNumber,
+      q: pos.q,
+      r: pos.r,
+    };
   });
-}
-
-export function getMapRows(playerCount: number): number[] {
-  return playerCount >= 5 ? ROWS_LARGE : ROWS;
 }
 
 // =============================================
@@ -267,22 +261,41 @@ export function payCost(player: Player, cost: Partial<Resources>): void {
 }
 
 // Check if a vertex is valid for building a settlement
-// 条件: (1) その頂点に誰の拠点もない (2) setupならどこでもOK (3) 通常は自分の道に隣接
 export function canBuildSettlement(
   vertexId: string,
   playerId: string,
   vertices: Vertex[],
   settlements: Settlement[],
   roads: Road[],
-  isSetupPhase: boolean,
-  difficulty: Difficulty = 'normal'
+  isSetupPhase: boolean
 ): boolean {
   const vertex = vertices.find(v => v.id === vertexId);
   if (!vertex) return false;
+
+  // Check no settlement already exists on this vertex
   if (settlements.some(s => s.vertexId === vertexId)) return false;
+
+  // Distance rule: no settlement on adjacent vertices
+  const hasAdjacentSettlement = vertex.adjacentVertexIds.some(adjVId =>
+    settlements.some(s => s.vertexId === adjVId)
+  );
+  if (hasAdjacentSettlement) return false;
+
+  // Only allow on vertices adjacent to at least one non-sea tile
+  const hasLandTile = vertex.adjacentTileIds.some(tileId => {
+    // tileId is the tile.id which equals the index
+    return true; // We already filtered sea-only vertices in generation
+  });
+
+  // During setup phase, can place anywhere (no road requirement)
   if (isSetupPhase) return true;
+
+  // During normal play, must have a road connected to this vertex
   const playerRoadEdgeIds = roads.filter(r => r.playerId === playerId).map(r => r.edgeId);
-  return vertex.adjacentEdgeIds.some(eId => playerRoadEdgeIds.includes(eId));
+  const vertexEdges = vertex.adjacentEdgeIds;
+  const hasRoad = vertexEdges.some(eId => playerRoadEdgeIds.includes(eId));
+
+  return hasRoad;
 }
 
 // Check if an edge is valid for building a road
@@ -343,47 +356,11 @@ export function getValidSettlementVertices(
   vertices: Vertex[],
   settlements: Settlement[],
   roads: Road[],
-  isSetupPhase: boolean,
-  difficulty: Difficulty = 'normal'
+  isSetupPhase: boolean
 ): string[] {
-  const result = vertices
-    .filter(v => canBuildSettlement(v.id, playerId, vertices, settlements, roads, isSetupPhase, difficulty))
+  return vertices
+    .filter(v => canBuildSettlement(v.id, playerId, vertices, settlements, roads, isSetupPhase))
     .map(v => v.id);
-
-  // --- Debug logging ---
-  if (!isSetupPhase) {
-    const playerRoads = roads.filter(r => r.playerId === playerId);
-    const playerRoadEdgeIds = new Set(playerRoads.map(r => r.edgeId));
-
-    // Find all vertices connected to player's roads
-    const roadVertexIds = new Set<string>();
-    vertices.forEach(v => {
-      if (v.adjacentEdgeIds.some(eId => playerRoadEdgeIds.has(eId))) {
-        roadVertexIds.add(v.id);
-      }
-    });
-
-    const analysis: { vertex: string; canBuild: boolean; reason: string }[] = [];
-    roadVertexIds.forEach(vid => {
-      const canBuild = canBuildSettlement(vid, playerId, vertices, settlements, roads, false, difficulty);
-      if (settlements.some(s => s.vertexId === vid)) {
-        analysis.push({ vertex: vid, canBuild, reason: 'OCCUPIED' });
-      } else if (!canBuild) {
-        analysis.push({ vertex: vid, canBuild, reason: 'NO_ROAD' });
-      } else {
-        analysis.push({ vertex: vid, canBuild, reason: 'OK' });
-      }
-    });
-
-    console.group(`[Settlement] player=${playerId.slice(-6)}, roads=${playerRoads.length}, valid=${result.length}`);
-    console.table(analysis);
-    if (result.length === 0) {
-      console.warn('NO VALID VERTICES!');
-    }
-    console.groupEnd();
-  }
-
-  return result;
 }
 
 // Get all valid edge IDs for building a road
@@ -475,108 +452,19 @@ export function calculateLongestRoad(
 }
 
 // =============================================
-// PORT GENERATION & TRADE RATE
-// =============================================
-
-// Generate ports on the outer edges of the map
-export function generatePorts(vertices: Vertex[], tiles: GameTile[]): Port[] {
-  // Find outer vertices: vertices that have fewer than 3 non-sea adjacent tiles
-  const outerEdgeVertices: string[] = [];
-  vertices.forEach(v => {
-    const nonSeaTiles = v.adjacentTileIds.filter(tid => {
-      const t = tiles.find(tt => tt.id === tid);
-      return t && t.type !== 'sea';
-    });
-    // Outer vertices touch 1-2 non-sea tiles (inner vertices touch 3)
-    if (nonSeaTiles.length > 0 && nonSeaTiles.length < 3) {
-      outerEdgeVertices.push(v.id);
-    }
-  });
-
-  // Find pairs of adjacent outer vertices (these form port edges)
-  const outerPairs: [string, string][] = [];
-  const usedVertices = new Set<string>();
-
-  for (const vId of outerEdgeVertices) {
-    if (usedVertices.has(vId)) continue;
-    const v = vertices.find(vv => vv.id === vId)!;
-    for (const adjId of v.adjacentVertexIds) {
-      if (usedVertices.has(adjId)) continue;
-      if (outerEdgeVertices.includes(adjId)) {
-        outerPairs.push([vId, adjId]);
-        usedVertices.add(vId);
-        usedVertices.add(adjId);
-        break;
-      }
-    }
-  }
-
-  // Shuffle and pick 6 ports
-  const shuffledPairs = shuffle(outerPairs);
-  const portTypes: ('general' | ResourceType)[] = ['general', 'general', 'rubber', 'oil', 'gold', 'food'];
-  const shuffledTypes = shuffle(portTypes);
-
-  const ports: Port[] = [];
-  const count = Math.min(shuffledPairs.length, shuffledTypes.length);
-  for (let i = 0; i < count; i++) {
-    ports.push({
-      id: `port${i}`,
-      vertexIds: [shuffledPairs[i][0], shuffledPairs[i][1]],
-      type: shuffledTypes[i],
-    });
-  }
-
-  return ports;
-}
-
-// Get the trade rate for a given player and resource
-export function getTradeRate(
-  playerId: string,
-  resource: ResourceType,
-  settlements: Settlement[],
-  ports: Port[]
-): number {
-  const playerVertexIds = new Set(
-    settlements.filter(s => s.playerId === playerId).map(s => s.vertexId)
-  );
-
-  let bestRate = TRADE_RATE_DEFAULT;
-
-  for (const port of ports) {
-    const hasSettlementAtPort = port.vertexIds.some(vid => playerVertexIds.has(vid));
-    if (!hasSettlementAtPort) continue;
-
-    if (port.type === resource) {
-      return TRADE_RATE_SPECIAL_PORT; // 2:1 is the best possible
-    }
-    if (port.type === 'general' && bestRate > TRADE_RATE_GENERAL_PORT) {
-      bestRate = TRADE_RATE_GENERAL_PORT;
-    }
-  }
-
-  return bestRate;
-}
-
-// =============================================
 // AI LOGIC
 // =============================================
 
-// AI: Choose vertex for initial settlement placement (difficulty-scaled)
+// AI: Choose best vertex for initial settlement placement
 export function aiChooseSetupVertex(
   playerId: string,
   tiles: GameTile[],
   vertices: Vertex[],
   settlements: Settlement[],
-  roads: Road[],
-  difficulty: Difficulty = 'easy'
+  roads: Road[]
 ): string | null {
   const valid = getValidSettlementVertices(playerId, vertices, settlements, roads, true);
   if (valid.length === 0) return null;
-
-  // Easy: pure random
-  if (difficulty === 'easy') {
-    return valid[Math.floor(Math.random() * valid.length)];
-  }
 
   // Score each vertex by the value of adjacent tiles
   const scored = valid.map(vId => {
@@ -585,20 +473,17 @@ export function aiChooseSetupVertex(
     vertex.adjacentTileIds.forEach(tileId => {
       const tile = tiles.find(t => t.id === tileId);
       if (!tile || tile.type === 'sea' || tile.type === 'desert') return;
+      // Higher probability dice numbers are more valuable
       const prob = tile.diceNumber <= 6 ? tile.diceNumber - 1 : 13 - tile.diceNumber;
-      score += prob + 1;
+      score += prob;
+      // Diversity bonus
+      score += 1;
     });
     return { vId, score };
   });
+
   scored.sort((a, b) => b.score - a.score);
-
-  // Normal: pick from top 50%
-  if (difficulty === 'normal') {
-    const topHalf = scored.slice(0, Math.max(1, Math.ceil(scored.length / 2)));
-    return topHalf[Math.floor(Math.random() * topHalf.length)].vId;
-  }
-
-  // Hard: pick from top 3
+  // Pick from top 3 randomly for variety
   const topN = scored.slice(0, Math.min(3, scored.length));
   return topN[Math.floor(Math.random() * topN.length)].vId;
 }
@@ -633,132 +518,77 @@ export function aiTurn(
   edges: Edge[],
   settlements: Settlement[],
   roads: Road[],
-  difficulty: Difficulty,
-  ports: Port[] = []
+  difficulty: Difficulty
 ): AITurnAction[] {
   const actions: AITurnAction[] = [];
+  
+  // Clone player resources for simulation
   const simResources = { ...player.resources };
 
-  const canAffordSim = (cost: Partial<Resources>): boolean =>
-    (Object.entries(cost) as [ResourceType, number][]).every(([res, amt]) => simResources[res] >= amt);
-
-  const payCostSim = (cost: Partial<Resources>): void =>
-    (Object.entries(cost) as [ResourceType, number][]).forEach(([res, amt]) => { simResources[res] -= amt; });
-
-  // Max actions per turn: easy=1, normal=2, hard=unlimited
-  const maxActions = difficulty === 'easy' ? 1 : difficulty === 'normal' ? 2 : 99;
-
-  // --- Helpers ---
-  const tryBuildSettlement = (): boolean => {
-    if (actions.length >= maxActions) return false;
-    if (!canAffordSim(BUILD_COSTS.settlement)) return false;
-    const validVertices = getValidSettlementVertices(player.id, vertices, settlements, roads, false, difficulty);
-    if (validVertices.length === 0) return false;
-    let chosen: string;
-    if (difficulty === 'easy') {
-      chosen = validVertices[Math.floor(Math.random() * validVertices.length)];
-    } else if (difficulty === 'normal') {
-      const scored = scoreVertices(validVertices, vertices, tiles);
-      const topHalf = scored.slice(0, Math.max(1, Math.ceil(scored.length / 2)));
-      chosen = topHalf[Math.floor(Math.random() * topHalf.length)].vId;
-    } else {
-      const scored = scoreVertices(validVertices, vertices, tiles);
-      chosen = scored[0].vId;
-    }
-    actions.push({ type: 'build_settlement', vertexId: chosen });
-    payCostSim(BUILD_COSTS.settlement);
-    return true;
+  const canAffordSim = (cost: Partial<Resources>): boolean => {
+    return (Object.entries(cost) as [ResourceType, number][]).every(
+      ([res, amount]) => simResources[res] >= amount
+    );
   };
 
-  const tryBuildRoad = (): boolean => {
-    if (actions.length >= maxActions) return false;
-    if (!canAffordSim(BUILD_COSTS.road)) return false;
-    const validEdges = getValidRoadEdges(player.id, edges, vertices, settlements, roads, false);
-    if (validEdges.length === 0) return false;
-    const chosen = validEdges[Math.floor(Math.random() * validEdges.length)];
-    actions.push({ type: 'build_road', edgeId: chosen });
-    payCostSim(BUILD_COSTS.road);
-    return true;
-  };
-
-  const tryUpgradeCity = (): boolean => {
-    if (actions.length >= maxActions) return false;
-    if (!canAffordSim(BUILD_COSTS.city)) return false;
-    const upgradeable = getUpgradeableVertices(player.id, settlements);
-    if (upgradeable.length === 0) return false;
-    const chosen = upgradeable[Math.floor(Math.random() * upgradeable.length)];
-    actions.push({ type: 'upgrade_city', vertexId: chosen });
-    payCostSim(BUILD_COSTS.city);
-    return true;
-  };
-
-  const tryTrade = (): boolean => {
-    if (actions.length >= maxActions) return false;
-    const allRes: ResourceType[] = ['rubber', 'oil', 'gold', 'food'];
-    const needed = allRes.find(r => simResources[r] === 0);
-    if (!needed) return false;
-    // Find excess resource considering port trade rates
-    const excess = allRes.find(r => {
-      const rate = getTradeRate(player.id, r, settlements, ports);
-      const threshold = difficulty === 'hard' ? rate : rate + 1;
-      return simResources[r] >= threshold;
+  const payCostSim = (cost: Partial<Resources>): void => {
+    (Object.entries(cost) as [ResourceType, number][]).forEach(([res, amount]) => {
+      simResources[res] -= amount;
     });
-    if (!excess) return false;
-    const rate = getTradeRate(player.id, excess, settlements, ports);
-    simResources[excess] -= rate;
-    simResources[needed] += 1;
-    actions.push({ type: 'trade', tradeFrom: excess, tradeTo: needed });
-    return true;
   };
 
-  const playerSettlementCount = settlements.filter(s => s.playerId === player.id && s.level === 'settlement').length;
+  // Priority: Build settlement > Build road > Upgrade to city
+  // Try to build settlement
+  if (canAffordSim(BUILD_COSTS.settlement)) {
+    const validVertices = getValidSettlementVertices(player.id, vertices, settlements, roads, false);
+    if (validVertices.length > 0) {
+      // Score vertices
+      const scored = validVertices.map(vId => {
+        const vertex = vertices.find(v => v.id === vId)!;
+        let score = 0;
+        vertex.adjacentTileIds.forEach(tileId => {
+          const tile = tiles.find(t => t.id === tileId);
+          if (!tile || tile.type === 'sea' || tile.type === 'desert') return;
+          const prob = tile.diceNumber <= 6 ? tile.diceNumber - 1 : 13 - tile.diceNumber;
+          score += prob;
+        });
+        return { vId, score };
+      });
+      scored.sort((a, b) => b.score - a.score);
+      const chosen = scored[0].vId;
+      actions.push({ type: 'build_settlement', vertexId: chosen });
+      payCostSim(BUILD_COSTS.settlement);
+    }
+  }
 
-  // =============================================
-  // EASY: simple — settlement or road only, 1 action max
-  // =============================================
-  if (difficulty === 'easy') {
-    if (!tryBuildSettlement()) {
-      tryBuildRoad();
+  // Try to build road
+  if (canAffordSim(BUILD_COSTS.road)) {
+    const validEdges = getValidRoadEdges(player.id, edges, vertices, settlements, roads, false);
+    if (validEdges.length > 0) {
+      const chosen = validEdges[Math.floor(Math.random() * validEdges.length)];
+      actions.push({ type: 'build_road', edgeId: chosen });
+      payCostSim(BUILD_COSTS.road);
     }
+  }
 
-  // =============================================
-  // NORMAL: balanced — up to 2 actions, trade on excess 5+
-  // =============================================
-  } else if (difficulty === 'normal') {
-    if (playerSettlementCount >= 2) {
-      if (!tryUpgradeCity()) tryBuildSettlement();
-    } else {
-      tryBuildSettlement();
+  // Try to upgrade to city
+  if (canAffordSim(BUILD_COSTS.city)) {
+    const upgradeable = getUpgradeableVertices(player.id, settlements);
+    if (upgradeable.length > 0) {
+      const chosen = upgradeable[Math.floor(Math.random() * upgradeable.length)];
+      actions.push({ type: 'upgrade_city', vertexId: chosen });
+      payCostSim(BUILD_COSTS.city);
     }
-    tryBuildRoad();
-    if (actions.length === 0) tryTrade();
+  }
 
-  // =============================================
-  // HARD: aggressive — unlimited actions, proactive trading
-  // =============================================
-  } else {
-    // Trade first if it enables a build
-    if (!canAffordSim(BUILD_COSTS.city) && !canAffordSim(BUILD_COSTS.settlement)) {
-      tryTrade();
+  // Trade if we have excess resources (4:1)
+  if (difficulty !== 'easy' && actions.length === 0) {
+    const resources: ResourceType[] = ['rubber', 'oil', 'gold', 'food'];
+    const excess = resources.find(r => simResources[r] >= 4);
+    const needed = resources.find(r => simResources[r] === 0);
+    if (excess && needed) {
+      actions.push({ type: 'trade', tradeFrom: excess, tradeTo: needed });
     }
-    // Build loop: keep building until out of resources or options
-    if (playerSettlementCount >= 3) {
-      tryUpgradeCity();
-      tryBuildRoad();
-      tryBuildSettlement();
-      tryUpgradeCity(); // try again after road
-    } else if (playerSettlementCount >= 2) {
-      if (!tryUpgradeCity()) tryBuildSettlement();
-      tryBuildRoad();
-      tryBuildSettlement();
-    } else {
-      tryBuildSettlement();
-      tryBuildRoad();
-      tryBuildSettlement();
-      tryUpgradeCity();
-    }
-    // Trade leftover excess
-    if (actions.length === 0) tryTrade();
   }
 
   if (actions.length === 0) {
@@ -768,38 +598,16 @@ export function aiTurn(
   return actions;
 }
 
-// Score vertices by adjacent tile dice probability
-function scoreVertices(
-  validVertices: string[],
-  vertices: Vertex[],
-  tiles: GameTile[]
-): { vId: string; score: number }[] {
-  const scored = validVertices.map(vId => {
-    const vertex = vertices.find(v => v.id === vId)!;
-    let score = 0;
-    vertex.adjacentTileIds.forEach(tileId => {
-      const tile = tiles.find(t => t.id === tileId);
-      if (!tile || tile.type === 'sea' || tile.type === 'desert') return;
-      const prob = tile.diceNumber <= 6 ? tile.diceNumber - 1 : 13 - tile.diceNumber;
-      score += prob;
-    });
-    return { vId, score };
-  });
-  scored.sort((a, b) => b.score - a.score);
-  return scored;
-}
-
 // =============================================
 // EVENT HANDLING
 // =============================================
 
 export function getRandomEvent(difficulty: Difficulty): EventCard | null {
-  // Events only trigger on dice 7 now, so use higher probability
-  const chance = difficulty === 'easy' ? 0.4 : difficulty === 'normal' ? 0.6 : 0.8;
+  const chance = difficulty === 'easy' ? 0.1 : difficulty === 'normal' ? 0.2 : 0.3;
   if (Math.random() > chance) return null;
 
-  const template = EVENT_CARDS[Math.floor(Math.random() * EVENT_CARDS.length)];
-  return { ...template, id: genId() } as EventCard;
+  const event = EVENT_CARDS[Math.floor(Math.random() * EVENT_CARDS.length)];
+  return { ...event, id: genId() };
 }
 
 export function generateGameLog(message: string, type?: GameLogEntry['type'], playerId?: string): GameLogEntry {

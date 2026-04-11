@@ -9,8 +9,8 @@ import { useGameStore } from '@/lib/gameStore';
 import { motion } from 'framer-motion';
 import { toast } from 'sonner';
 
-const HERO_BG = '/hero-bg.webp';
-const TITLE_BANNER = '/title-banner.webp';
+const HERO_BG = 'https://d2xsxph8kpxj0f.cloudfront.net/310519663286960690/RthryRhRZNJvzXLKUFJiBd/hero-bg-JDykZ5tdFBU7vL2qTmUcmb.webp';
+const TITLE_BANNER = 'https://d2xsxph8kpxj0f.cloudfront.net/310519663286960690/RthryRhRZNJvzXLKUFJiBd/title-banner-JMEVasTGYkPM5xtrDuLWqd.webp';
 
 export default function TitleScreen() {
   const setScreen = useGameStore(s => s.setScreen);
@@ -32,7 +32,7 @@ export default function TitleScreen() {
         initial={{ y: -60, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
         transition={{ duration: 0.6, ease: 'easeOut' }}
-        className="relative z-10 mt-8 sm:mt-12 md:mt-16 px-4 w-full max-w-lg md:max-w-xl"
+        className="relative z-10 mt-8 sm:mt-12 px-4 w-full max-w-lg"
       >
         <img
           src={TITLE_BANNER}
@@ -47,7 +47,7 @@ export default function TitleScreen() {
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ delay: 0.4 }}
-        className="relative z-10 mt-3 text-white font-heading text-lg sm:text-xl md:text-2xl font-bold drop-shadow-lg"
+        className="relative z-10 mt-3 text-white font-heading text-lg sm:text-xl font-bold drop-shadow-lg"
         style={{ textShadow: '0 2px 8px rgba(0,0,0,0.6)' }}
       >
         資源を集めて世界を広げよう！
@@ -58,7 +58,7 @@ export default function TitleScreen() {
         initial={{ y: 40, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
         transition={{ delay: 0.5, duration: 0.5 }}
-        className="relative z-10 mt-8 flex flex-col gap-4 w-full max-w-xs md:max-w-sm px-4"
+        className="relative z-10 mt-8 flex flex-col gap-4 w-full max-w-xs px-4"
       >
         <button
           onClick={() => setScreen('create')}
@@ -68,22 +68,8 @@ export default function TitleScreen() {
         </button>
 
         <button
-          onClick={() => setScreen('quiz_practice')}
-          className="game-btn-blue text-xl py-4 rounded-2xl"
-        >
-          📝 クイズ練習
-        </button>
-
-        <button
-          onClick={() => setScreen('ranking')}
-          className="game-btn-gold text-xl py-4 rounded-2xl"
-        >
-          🏆 ランキング
-        </button>
-
-        <button
           onClick={() => toast('📖 ルールはゲーム中にヘルプボタン(?)から確認できます！')}
-          className="game-btn-blue text-lg py-3 rounded-2xl"
+          className="game-btn-gold text-xl py-4 rounded-2xl"
         >
           📖 ルールをみる
         </button>

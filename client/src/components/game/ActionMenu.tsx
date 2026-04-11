@@ -7,7 +7,7 @@
  */
 import { useGameStore } from '@/lib/gameStore';
 import { BUILD_COSTS, RESOURCE_INFO, type ResourceType } from '@/lib/gameTypes';
-import { canAfford, getUpgradeableVertices, getValidSettlementVertices, getValidRoadEdges, getTradeRate } from '@/lib/gameLogic';
+import { canAfford, getUpgradeableVertices, getValidSettlementVertices, getValidRoadEdges } from '@/lib/gameLogic';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useState } from 'react';
 import { Hammer, ArrowRightLeft, SkipForward, X, Check } from 'lucide-react';
@@ -17,7 +17,7 @@ export default function ActionMenu() {
     phase, players, currentPlayerIndex, doEndTurn,
     buildMode, startBuild, cancelBuild, confirmBuild,
     selectedVertexId, selectedEdgeId,
-    vertices, edges, settlements, roads, difficulty,
+    vertices, edges, settlements, roads,
   } = useGameStore();
   const [showBuild, setShowBuild] = useState(false);
   const [showTrade, setShowTrade] = useState(false);
@@ -30,7 +30,7 @@ export default function ActionMenu() {
   const canBuildRoadAfford = canAfford(player, BUILD_COSTS.road);
 
   // Check if there are valid positions
-  const hasValidSettlements = getValidSettlementVertices(player.id, vertices, settlements, roads, false, difficulty).length > 0;
+  const hasValidSettlements = getValidSettlementVertices(player.id, vertices, settlements, roads, false).length > 0;
   const hasValidRoads = getValidRoadEdges(player.id, edges, vertices, settlements, roads, false).length > 0;
   const hasUpgradeableSettlements = getUpgradeableVertices(player.id, settlements).length > 0;
 
@@ -105,29 +105,12 @@ export default function ActionMenu() {
             <h3 className="font-heading font-bold text-amber-900 text-center mb-2">
               なにを建てる？
             </h3>
-            <div className="flex justify-center gap-2 mb-2 text-xs font-bold text-amber-800">
-              {(['rubber', 'oil', 'gold', 'food'] as ResourceType[]).map(res => (
-                <span key={res} className={player.resources[res] > 0 ? '' : 'opacity-40'}>
-                  {RESOURCE_INFO[res].icon}{player.resources[res]}
-                </span>
-              ))}
-            </div>
-            {!canBuildRoadAfford && !canBuildSettlementAfford && !canBuildCityAfford ? (
-              <div className="text-center text-red-500 text-xs font-bold mb-2 bg-red-50 rounded-lg py-1.5 border border-red-200">
-                ⚠️ 資源が足りません。交換やサイコロで集めよう！
-              </div>
-            ) : canBuildRoadAfford && hasValidRoads && !hasValidSettlements && (
-              <div className="text-center text-blue-600 text-xs font-bold mb-2 bg-blue-50 rounded-lg py-1.5 border border-blue-200">
-                💡 まず道を伸ばして、拠点を建てる場所を作ろう！
-              </div>
-            )}
             <div className="flex flex-col gap-2">
               <BuildOption
                 label="🛤️ 道"
                 cost="ゴム1・石油1"
                 points="道"
                 enabled={canBuildRoadAfford && hasValidRoads}
-                disabledReason={!canBuildRoadAfford ? '資源が足りない' : !hasValidRoads ? '建設できる場所がない' : undefined}
                 description="道をつなげて新しい場所に拠点を建てよう！"
                 onClick={() => handleSelectBuildType('road')}
               />
@@ -136,7 +119,6 @@ export default function ActionMenu() {
                 cost="ゴム1・食料1・金1・石油1"
                 points="+1点"
                 enabled={canBuildSettlementAfford && hasValidSettlements}
-                disabledReason={!canBuildSettlementAfford ? '資源が足りない' : !hasValidSettlements ? '場所がない（道を伸ばそう！）' : undefined}
                 description="頂点に拠点を建てると、隣のタイルから資源がもらえる！"
                 onClick={() => handleSelectBuildType('settlement')}
               />
@@ -145,7 +127,6 @@ export default function ActionMenu() {
                 cost="石油2・金2・食料1"
                 points="+1点"
                 enabled={canBuildCityAfford && hasUpgradeableSettlements}
-                disabledReason={!canBuildCityAfford ? '資源が足りない' : !hasUpgradeableSettlements ? 'アップグレードできる拠点がない' : undefined}
                 description="拠点を都市にすると、資源が2倍もらえるよ！"
                 onClick={() => handleSelectBuildType('city')}
               />
@@ -170,7 +151,7 @@ export default function ActionMenu() {
             className="parchment rounded-xl p-3 mb-2"
           >
             <h3 className="font-heading font-bold text-amber-900 text-center mb-2">
-              交換する（資源 → 1つ）
+              交換する（3つ → 1つ）
             </h3>
             <TradePanel onClose={() => setShowTrade(false)} />
           </motion.div>
@@ -234,12 +215,11 @@ function ActionButton({ icon, label, color, onClick, active }: {
   );
 }
 
-function BuildOption({ label, cost, points, enabled, disabledReason, description, onClick }: {
+function BuildOption({ label, cost, points, enabled, description, onClick }: {
   label: string;
   cost: string;
   points: string;
   enabled: boolean;
-  disabledReason?: string;
   description: string;
   onClick: () => void;
 }) {
@@ -256,13 +236,7 @@ function BuildOption({ label, cost, points, enabled, disabledReason, description
       <div className="flex-1">
         <div className="font-heading font-bold text-amber-900">{label}</div>
         <div className="text-xs text-amber-700">{cost}</div>
-        {enabled ? (
-          <div className="text-xs text-amber-600 mt-0.5">{description}</div>
-        ) : disabledReason ? (
-          <div className="text-xs text-red-500 mt-0.5">⚠️ {disabledReason}</div>
-        ) : (
-          <div className="text-xs text-amber-600 mt-0.5">{description}</div>
-        )}
+        <div className="text-xs text-amber-600 mt-0.5">{description}</div>
       </div>
       <div className="font-score font-bold text-amber-600 text-sm ml-2 shrink-0">{points}</div>
     </button>
@@ -270,48 +244,35 @@ function BuildOption({ label, cost, points, enabled, disabledReason, description
 }
 
 function TradePanel({ onClose }: { onClose: () => void }) {
-  const { players, currentPlayerIndex, doTrade, settlements, ports } = useGameStore();
+  const { players, currentPlayerIndex, doTrade } = useGameStore();
   const player = players[currentPlayerIndex];
   const resources: ResourceType[] = ['rubber', 'oil', 'gold', 'food'];
   const [giveRes, setGiveRes] = useState<ResourceType | null>(null);
 
   if (!player) return null;
 
-  // Calculate trade rates for each resource
-  const tradeRates: Record<ResourceType, number> = {} as Record<ResourceType, number>;
-  resources.forEach(res => {
-    tradeRates[res] = getTradeRate(player.id, res, settlements, ports);
-  });
-
   if (!giveRes) {
     return (
       <div>
         <p className="text-amber-800 text-sm text-center mb-2">
-          どの資源を出す？
+          どの資源を3つ出す？
         </p>
         <div className="grid grid-cols-2 gap-2">
           {resources.map(res => {
             const info = RESOURCE_INFO[res];
-            const rate = tradeRates[res];
-            const hasEnough = player.resources[res] >= rate;
-            const isDiscounted = rate < 4;
+            const hasEnough = player.resources[res] >= 3;
             return (
               <button
                 key={res}
                 disabled={!hasEnough}
                 onClick={() => setGiveRes(res)}
-                className={`p-2 rounded-lg font-heading font-bold text-sm relative ${
+                className={`p-2 rounded-lg font-heading font-bold text-sm ${
                   hasEnough
-                    ? isDiscounted
-                      ? 'bg-amber-50 border-2 border-yellow-500 text-amber-900 active:scale-95 ring-1 ring-yellow-300'
-                      : 'bg-white border-2 border-amber-400 text-amber-900 active:scale-95'
+                    ? 'bg-white border-2 border-amber-400 text-amber-900 active:scale-95'
                     : 'bg-gray-100 border-2 border-gray-300 text-gray-400'
                 }`}
               >
                 {info.icon} {info.name} ({player.resources[res]})
-                <span className={`block text-xs mt-0.5 ${isDiscounted ? 'text-yellow-600 font-bold' : 'text-amber-600'}`}>
-                  {isDiscounted ? `⚓${rate}:1` : `${rate}:1`}
-                </span>
               </button>
             );
           })}
@@ -326,13 +287,10 @@ function TradePanel({ onClose }: { onClose: () => void }) {
     );
   }
 
-  const giveRate = tradeRates[giveRes];
-
   return (
     <div>
       <p className="text-amber-800 text-sm text-center mb-2">
-        {RESOURCE_INFO[giveRes].icon} {RESOURCE_INFO[giveRes].name}{giveRate}つで何がほしい？
-        {giveRate < 4 && <span className="text-yellow-600 font-bold"> ⚓港で割引！</span>}
+        {RESOURCE_INFO[giveRes].icon} {RESOURCE_INFO[giveRes].name}3つで何がほしい？
       </p>
       <div className="grid grid-cols-2 gap-2">
         {resources.filter(r => r !== giveRes).map(res => {
