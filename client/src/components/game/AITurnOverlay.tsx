@@ -20,6 +20,8 @@ const ACTION_DURATIONS: Record<AIAction['type'], number> = {
   build_road: 1500,
   event: 2200,
   turn_end: 800,
+  // AI quiz: 1.5s thinking + 1.5s answer reveal + 1.5s result = 4500ms
+  ai_quiz: 4500,
 };
 
 function DiceFace({ value }: { value: number }) {
@@ -406,6 +408,10 @@ function ActionContent({ action }: { action: AIAction }) {
         </div>
       );
 
+    case 'ai_quiz':
+      // Rendered by QuizPopup (full-screen overlay) — overlay card stays empty
+      return null;
+
     default:
       return null;
   }
@@ -501,9 +507,9 @@ export default function AITurnOverlay() {
         className="absolute inset-0 bg-black/40 pointer-events-auto"
       />
 
-      {/* Action card */}
+      {/* Action card — hidden during ai_quiz (QuizPopup takes over) */}
       <AnimatePresence mode="wait">
-        {currentAIAction && (
+        {currentAIAction && currentAIAction.type !== 'ai_quiz' && (
           <motion.div
             key={`${currentAIAction.type}-${currentAIAction.playerId}-${aiQueueLength}`}
             initial={{ opacity: 0, scale: 0.7, y: 30 }}

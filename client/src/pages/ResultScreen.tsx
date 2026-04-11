@@ -6,7 +6,13 @@ import { useGameStore } from '@/lib/gameStore';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useMemo, useState, useEffect } from 'react';
 import { calculateLongestRoad } from '@/lib/gameLogic';
-import { isSupabaseEnabled, saveGameResult, rankToPoints, getTitle } from '@/lib/supabase';
+import {
+  isSupabaseEnabled, saveGameResult, rankToPoints, getTitle, getLevel,
+  fetchPlayerHistory, fetchRanking,
+} from '@/lib/supabase';
+import {
+  BADGES, computeBadges, mergeBadges, getLastLevel, setLastLevel, setStoredPlayerName,
+} from '@/lib/achievements';
 
 const HERO_BG = '/hero-bg.webp';
 
@@ -126,13 +132,19 @@ function StatCard({ icon, label, value, delay }: { icon: string; label: string; 
 }
 
 export default function ResultScreen() {
-  const { winner, players, currentTurn, setScreen, gameLog, settlements, roads, edges, vertices, longestRoadPlayerId, difficulty } = useGameStore();
+  const {
+    winner, players, currentTurn, setScreen, gameLog, settlements, roads, edges, vertices,
+    longestRoadPlayerId, difficulty, quizCorrectCount, quizTotalCount,
+    sevensRolledCount, wasLastPlaceOnce,
+  } = useGameStore();
   const [showStats, setShowStats] = useState(false);
   const [showButtons, setShowButtons] = useState(false);
   const [showNameInput, setShowNameInput] = useState(false);
   const [playerName, setPlayerName] = useState('');
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [newBadges, setNewBadges] = useState<string[]>([]);
+  const [levelUp, setLevelUp] = useState<{ from: number; to: number } | null>(null);
 
   const sortedPlayers = [...players].sort((a, b) => b.victoryPoints - a.victoryPoints);
   const champ = winner || sortedPlayers[0];
@@ -158,15 +170,22 @@ export default function ResultScreen() {
   const handleSaveResult = async () => {
     if (!playerName.trim() || saving) return;
     setSaving(true);
+    const trimmed = playerName.trim();
+    setStoredPlayerName(trimmed);
+
     // Save results for all human players
     const humanPlayers = sortedPlayersForSave.filter(p => p.isHuman);
+    const savedNames: string[] = [];
     for (const p of humanPlayers) {
       const rank = sortedPlayersForSave.findIndex(pp => pp.id === p.id) + 1;
       const pSettlements = settlements.filter(s => s.playerId === p.id && s.level === 'settlement').length;
       const pCities = settlements.filter(s => s.playerId === p.id && s.level === 'city').length;
       const pRoads = roads.filter(r => r.playerId === p.id).length;
+      const hadLongestRoad = longestRoadPlayerId === p.id;
+      const cameFromBehind = wasLastPlaceOnce && rank === 1;
+      const fullName = humanPlayers.length === 1 ? trimmed : `${trimmed} (${p.name})`;
       await saveGameResult({
-        player_name: humanPlayers.length === 1 ? playerName.trim() : `${playerName.trim()} (${p.name})`,
+        player_name: fullName,
         victory_points: p.victoryPoints,
         rank,
         turns_used: currentTurn,
@@ -175,11 +194,40 @@ export default function ResultScreen() {
         roads_count: pRoads,
         difficulty: difficulty,
         player_count: players.length,
+        quiz_correct: quizCorrectCount,
+        quiz_total: quizTotalCount,
+        sevens_rolled: sevensRolledCount,
+        had_longest_road: hadLongestRoad,
+        came_from_behind: cameFromBehind,
       });
+      savedNames.push(fullName);
     }
     setSaved(true);
     setSaving(false);
     setShowNameInput(false);
+
+    // Recompute badges + level for the primary player (first human)
+    try {
+      const primary = savedNames[0];
+      if (primary) {
+        const history = await fetchPlayerHistory(primary, 200);
+        const computed = computeBadges(history);
+        const newly = mergeBadges(primary, computed);
+        if (newly.size > 0) setNewBadges(Array.from(newly));
+
+        // Level-up check
+        const ranking = await fetchRanking();
+        const myEntry = ranking.find(r => r.player_name === primary);
+        if (myEntry) {
+          const newLevel = getLevel(myEntry.total_points).level;
+          const prevLevel = getLastLevel(primary);
+          if (newLevel > prevLevel) setLevelUp({ from: prevLevel, to: newLevel });
+          setLastLevel(primary, newLevel);
+        }
+      }
+    } catch (e) {
+      console.error('[ResultScreen] badge/level recompute failed', e);
+    }
   };
 
   return (
@@ -470,6 +518,72 @@ export default function ResultScreen() {
             ✅ ランキングに登録しました！
           </motion.div>
         )}
+
+        {/* Level up animation */}
+        <AnimatePresence>
+          {levelUp && (
+            <motion.div
+              initial={{ scale: 0, opacity: 0, rotate: -10 }}
+              animate={{ scale: 1, opacity: 1, rotate: 0 }}
+              exit={{ opacity: 0 }}
+              transition={{ type: 'spring', damping: 10 }}
+              className="relative mb-4 mx-auto max-w-xs text-center p-4 rounded-2xl"
+              style={{
+                background: 'linear-gradient(135deg, #FFD700, #FFA500, #FF69B4, #9B59B6)',
+                boxShadow: '0 0 40px rgba(255,215,0,0.8)',
+                border: '3px solid #FFF',
+              }}
+            >
+              <motion.div
+                animate={{ scale: [1, 1.15, 1], rotate: [0, 4, -4, 0] }}
+                transition={{ duration: 1.2, repeat: Infinity }}
+                className="text-5xl mb-1"
+              >
+                ✨
+              </motion.div>
+              <div className="font-heading font-black text-white text-2xl drop-shadow-lg tracking-wider">
+                LEVEL UP!
+              </div>
+              <div className="font-score text-white text-lg mt-1">
+                Lv.{levelUp.from} → Lv.{levelUp.to}
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Newly unlocked badges */}
+        <AnimatePresence>
+          {newBadges.length > 0 && (
+            <motion.div
+              initial={{ y: 20, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="parchment rounded-xl p-4 mb-4"
+            >
+              <h2 className="font-heading text-lg font-bold text-amber-900 text-center mb-2">
+                🎖️ 新しいバッジをゲット！
+              </h2>
+              <div className="flex flex-wrap gap-2 justify-center">
+                {newBadges.map(id => {
+                  const b = BADGES[id];
+                  if (!b) return null;
+                  return (
+                    <motion.div
+                      key={id}
+                      initial={{ scale: 0, rotate: -180 }}
+                      animate={{ scale: 1, rotate: 0 }}
+                      transition={{ type: 'spring', damping: 10 }}
+                      className="bg-gradient-to-br from-amber-200 to-amber-400 border-2 border-amber-600 rounded-xl px-3 py-2 text-center"
+                    >
+                      <div className="text-3xl">{b.emoji}</div>
+                      <div className="text-xs font-heading font-bold text-amber-900">{b.name}</div>
+                    </motion.div>
+                  );
+                })}
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* Play Again Buttons */}
         <AnimatePresence>

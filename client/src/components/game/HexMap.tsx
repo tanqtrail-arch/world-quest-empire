@@ -59,13 +59,33 @@ function DiceResultZoom({ diceTotal, players, resourceGains, playerColors, playe
         </div>
 
         {diceTotal === 7 ? (
-          <div className="text-center py-3">
-            <div className="text-4xl mb-2">🎉</div>
-            <div className="font-heading font-bold text-lg text-emerald-700">
-              ラッキー7！全資源+1！
+          <div className="py-2">
+            <div className="text-center mb-2">
+              <div className="text-3xl mb-1">🎉</div>
+              <div className="font-heading font-bold text-base text-emerald-700">
+                ラッキー7！全員全資源+1！
+              </div>
+              <div className="text-xs text-emerald-600 mt-0.5">
+                そして出目を出した人はクイズに挑戦！
+              </div>
             </div>
-            <div className="text-sm text-emerald-600 mt-1">
-              🌿+1 🛢️+1 💰+1 🌾+1
+            <div className="space-y-1">
+              {players.map(p => (
+                <motion.div
+                  key={p.id}
+                  initial={{ x: -12, opacity: 0 }}
+                  animate={{ x: 0, opacity: 1 }}
+                  transition={{ delay: 0.1 }}
+                  className="flex items-center gap-2 bg-white/80 rounded-lg px-2.5 py-1.5 border border-emerald-200"
+                  style={{ borderLeftColor: playerColors[p.id], borderLeftWidth: 4 }}
+                >
+                  <span className="text-base">{p.flagEmoji}</span>
+                  <span className="font-heading font-bold text-xs text-amber-900 shrink-0">{p.name}</span>
+                  <div className="ml-auto text-xs font-bold text-emerald-700">
+                    🌿+1 🛢️+1 💰+1 🌾+1
+                  </div>
+                </motion.div>
+              ))}
             </div>
           </div>
         ) : resourceGains.length === 0 ? (
@@ -388,7 +408,7 @@ export default function HexMap() {
             );
           })}
 
-          {/* Layer 1.5: Ports (港) */}
+          {/* Layer 1.5: Ports (港) — large, colorful, labeled */}
           {ports.map((port: Port) => {
             const v1 = vertices.find(v => v.id === port.vertexIds[0]);
             const v2 = vertices.find(v => v.id === port.vertexIds[1]);
@@ -401,55 +421,118 @@ export default function HexMap() {
             const centerY = svgH / 2;
             const dx = midX - centerX;
             const dy = midY - centerY;
-            const dist = Math.sqrt(dx * dx + dy * dy);
-            const offsetDist = 22;
+            const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+            const offsetDist = 34;
             const portX = midX + (dx / dist) * offsetDist;
             const portY = midY + (dy / dist) * offsetDist;
 
-            const rateLabel = port.type === 'general' ? '3:1' : '2:1';
-            const portIcon = port.type === 'general' ? '⚓' : RESOURCE_INFO[port.type as ResourceType].icon;
+            // Port type → colors
+            type PortPalette = { bg: string; bgDark: string; line: string; icon: string; rate: string };
+            const palettes: Record<string, PortPalette> = {
+              general: { bg: '#B8860B', bgDark: '#6B4A0E', line: '#8B6914', icon: '⚓', rate: '3:1' },
+              rubber:  { bg: '#66BB6A', bgDark: '#2E7D32', line: '#2E7D32', icon: '🌿', rate: '2:1' },
+              oil:     { bg: '#546E7A', bgDark: '#263238', line: '#37474F', icon: '🛢️', rate: '2:1' },
+              gold:    { bg: '#FFD54F', bgDark: '#F9A825', line: '#F9A825', icon: '💰', rate: '2:1' },
+              food:    { bg: '#FFA726', bgDark: '#E65100', line: '#E65100', icon: '🌾', rate: '2:1' },
+            };
+            const pal = palettes[port.type] || palettes.general;
+            const rateLabel = port.type === 'general' ? '3:1' : `${pal.icon}2:1`;
 
             // Check if current player has a settlement on this port's vertices
             const myId = currentPlayer?.id;
-            const isMyPort = myId && port.vertexIds.some(vid =>
+            const isMyPort = !!(myId && port.vertexIds.some(vid =>
               settlements.some(s => s.vertexId === vid && s.playerId === myId)
-            );
+            ));
+
+            const plateR = 22;
 
             return (
               <g key={port.id}>
-                {/* Connection lines to vertices */}
+                <defs>
+                  <radialGradient id={`port-grad-${port.id}`} cx="35%" cy="35%" r="75%">
+                    <stop offset="0%" stopColor={pal.bg} />
+                    <stop offset="100%" stopColor={pal.bgDark} />
+                  </radialGradient>
+                </defs>
+
+                {/* Connection lines: port → vertices */}
                 <line
                   x1={v1.x} y1={v1.y} x2={portX} y2={portY}
-                  stroke={isMyPort ? '#FFD700' : '#8B6914'} strokeWidth={isMyPort ? 2 : 1.5}
-                  strokeDasharray="3,3" opacity={isMyPort ? 0.8 : 0.4}
+                  stroke={isMyPort ? '#FFD700' : pal.line}
+                  strokeWidth={isMyPort ? 3 : 2.5}
+                  strokeDasharray="5,3"
+                  opacity={isMyPort ? 0.95 : 0.7}
                 />
                 <line
                   x1={v2.x} y1={v2.y} x2={portX} y2={portY}
-                  stroke={isMyPort ? '#FFD700' : '#8B6914'} strokeWidth={isMyPort ? 2 : 1.5}
-                  strokeDasharray="3,3" opacity={isMyPort ? 0.8 : 0.4}
+                  stroke={isMyPort ? '#FFD700' : pal.line}
+                  strokeWidth={isMyPort ? 3 : 2.5}
+                  strokeDasharray="5,3"
+                  opacity={isMyPort ? 0.95 : 0.7}
                 />
-                {/* Port background */}
+
+                {/* Sparkle ring (only if my port) */}
+                {isMyPort && (
+                  <circle
+                    cx={portX} cy={portY} r={plateR + 5}
+                    fill="none"
+                    stroke="#FFD700"
+                    strokeWidth={2}
+                    strokeDasharray="4,3"
+                  >
+                    <animate attributeName="stroke-dashoffset" values="0;14" dur="1.2s" repeatCount="indefinite" />
+                    <animate attributeName="opacity" values="0.4;1;0.4" dur="1.5s" repeatCount="indefinite" />
+                  </circle>
+                )}
+
+                {/* Wooden plate background */}
                 <circle
-                  cx={portX} cy={portY} r={16}
-                  fill={isMyPort ? '#FFF3CD' : '#FFF8E1'}
-                  stroke={isMyPort ? '#FFD700' : '#8B6914'}
-                  strokeWidth={isMyPort ? 3 : 2}
-                  style={{ filter: isMyPort ? 'drop-shadow(0 0 6px rgba(255,215,0,0.6))' : 'drop-shadow(0 1px 3px rgba(0,0,0,0.3))' }}
+                  cx={portX} cy={portY} r={plateR}
+                  fill={`url(#port-grad-${port.id})`}
+                  stroke="white"
+                  strokeWidth={3}
+                  style={{
+                    filter: isMyPort
+                      ? 'drop-shadow(0 0 12px rgba(255,215,0,0.9)) drop-shadow(0 2px 4px rgba(0,0,0,0.5))'
+                      : 'drop-shadow(0 2px 5px rgba(0,0,0,0.55))',
+                  }}
+                >
+                  {isMyPort && (
+                    <animate attributeName="r" values={`${plateR};${plateR + 2};${plateR}`} dur="1.5s" repeatCount="indefinite" />
+                  )}
+                </circle>
+                {/* Inner border (wood rim) */}
+                <circle
+                  cx={portX} cy={portY} r={plateR - 3}
+                  fill="none"
+                  stroke="rgba(255,255,255,0.35)"
+                  strokeWidth={1.5}
                 />
-                {/* Port icon */}
+
+                {/* Port icon — large */}
                 <text
                   x={portX} y={portY - 4}
                   textAnchor="middle" dominantBaseline="middle"
-                  fontSize={12} className="select-none pointer-events-none"
+                  fontSize={24}
+                  className="select-none pointer-events-none"
+                  style={{ filter: 'drop-shadow(0 1px 2px rgba(0,0,0,0.7))' }}
                 >
-                  {portIcon}
+                  {pal.icon}
                 </text>
-                {/* Rate label */}
+                {/* Rate label — bold, white on dark pill */}
+                <rect
+                  x={portX - 17} y={portY + 9}
+                  width={34} height={12}
+                  rx={6} ry={6}
+                  fill="rgba(0,0,0,0.6)"
+                  stroke="white"
+                  strokeWidth={1}
+                />
                 <text
-                  x={portX} y={portY + 8}
+                  x={portX} y={portY + 16}
                   textAnchor="middle" dominantBaseline="middle"
-                  fontSize={8} fontWeight="bold"
-                  fill={isMyPort ? '#B8860B' : '#5C3D2E'}
+                  fontSize={10} fontWeight="bold" fontFamily="'Fredoka', sans-serif"
+                  fill="white"
                   className="select-none pointer-events-none"
                 >
                   {rateLabel}

@@ -21,7 +21,7 @@ import {
 
 // --- AI Action Types ---
 export interface AIAction {
-  type: 'turn_start' | 'dice_roll' | 'resource_gain' | 'dice_gains' | 'lucky_seven' | 'no_resource' | 'build_road' | 'build_settlement' | 'upgrade_city' | 'event' | 'turn_end';
+  type: 'turn_start' | 'dice_roll' | 'resource_gain' | 'dice_gains' | 'lucky_seven' | 'no_resource' | 'build_road' | 'build_settlement' | 'upgrade_city' | 'event' | 'turn_end' | 'ai_quiz';
   playerId: string;
   playerName: string;
   playerFlag: string;
@@ -43,6 +43,10 @@ export interface AIAction {
   eventIcon?: string;
   eventCategory?: 'positive' | 'negative';
   eventDetail?: string;
+  // AI quiz fields
+  quizQuestion?: QuizQuestion;
+  quizAIChoiceIndex?: number;
+  quizAICorrect?: boolean;
 }
 
 // --- Resource Gain Popup ---
@@ -129,6 +133,12 @@ interface GameStore {
   currentQuiz: QuizQuestion | null;
   quizResult: 'correct' | 'incorrect' | 'timeout' | null;
   quizResourcePickRemaining: number; // 正解時の資源選択残り数
+  quizCorrectCount: number; // ゲーム中のクイズ正解数（ランキング用）
+  quizTotalCount: number;   // ゲーム中のクイズ出題数（ランキング用）
+
+  // Badge tracking (per-game)
+  sevensRolledCount: number; // ヒューマンが振って7が出た回数
+  wasLastPlaceOnce: boolean; // ヒューマンが一度でも最下位になったか（逆転王判定用）
 
   // Turn timer
   timerEnabled: boolean;
@@ -217,6 +227,10 @@ export const useGameStore = create<GameStore>((set, get) => ({
   currentQuiz: null,
   quizResult: null,
   quizResourcePickRemaining: 0,
+  quizCorrectCount: 0,
+  quizTotalCount: 0,
+  sevensRolledCount: 0,
+  wasLastPlaceOnce: false,
 
   timerEnabled: true,
   turnTimeRemaining: TURN_TIMER_SECONDS,
@@ -297,6 +311,10 @@ export const useGameStore = create<GameStore>((set, get) => ({
       currentQuiz: null,
       quizResult: null,
       quizResourcePickRemaining: 0,
+      quizCorrectCount: 0,
+      quizTotalCount: 0,
+      sevensRolledCount: 0,
+      wasLastPlaceOnce: false,
       timerEnabled,
       turnTimeRemaining: TURN_TIMER_SECONDS,
       turnTimerActive: false,
@@ -488,6 +506,11 @@ export const useGameStore = create<GameStore>((set, get) => ({
     const total = dice[0] + dice[1];
     const currentPlayer = state.players[state.currentPlayerIndex];
 
+    // Track 7-rolls by human players (badge: lucky 7)
+    if (total === 7 && !currentPlayer.isAI) {
+      set({ sevensRolledCount: state.sevensRolledCount + 1 });
+    }
+
     const logs: GameLogEntry[] = [
       generateGameLog(`${currentPlayer.name}がサイコロを振った！ 🎲 ${dice[0]} + ${dice[1]} = ${total}`, 'info', currentPlayer.id),
     ];
@@ -497,18 +520,21 @@ export const useGameStore = create<GameStore>((set, get) => ({
     const resourceGainPopups: ResourceGainPopup[] = [];
 
     if (total === 7) {
-      const player = newPlayers.find(p => p.id === currentPlayer.id)!;
       const allRes: ResourceType[] = ['rubber', 'oil', 'gold', 'food'];
-      allRes.forEach(res => { player.resources[res] += 1; });
-      logs.push(generateGameLog(`🎲7！${player.name}が全資源+1！`, 'resource', player.id));
-      resourceGainPopups.push({
-        playerId: player.id,
-        playerName: player.name,
-        playerFlag: player.flagEmoji,
-        playerColor: player.color,
-        resource: 'rubber',
-        amount: 1,
+      // Lucky 7: ALL players gain +1 of every resource
+      newPlayers.forEach(p => {
+        allRes.forEach(res => { p.resources[res] += 1; });
+        resourceGainPopups.push({
+          playerId: p.id,
+          playerName: p.name,
+          playerFlag: p.flagEmoji,
+          playerColor: p.color,
+          resource: 'rubber',
+          amount: 1,
+        });
       });
+      logs.push(generateGameLog(`🎲7！全プレイヤーが全資源+1！`, 'resource', currentPlayer.id));
+      logs.push(generateGameLog(`📜 ${currentPlayer.name}は歴史クイズに挑戦！`, 'info', currentPlayer.id));
     } else {
       const gains = distributeResourcesWithVertices(
         state.tiles, state.vertices, state.settlements, state.players, total
@@ -595,7 +621,11 @@ export const useGameStore = create<GameStore>((set, get) => ({
       return { ...p, resources: { ...p.resources, gold: p.resources.gold - 4 } };
     });
 
-    set({ players: newPlayers, usedGoldDice: true });
+    set({
+      players: newPlayers,
+      usedGoldDice: true,
+      sevensRolledCount: state.sevensRolledCount + 1,
+    });
 
     // 7確定でdoRollDiceと同等処理を実行
     const dice: [number, number] = [3, 4];
@@ -607,19 +637,22 @@ export const useGameStore = create<GameStore>((set, get) => ({
     ];
 
     const updatedPlayers = newPlayers.map(p => ({ ...p, resources: { ...p.resources } }));
-    const rollingPlayer = updatedPlayers.find(p => p.id === currentPlayer.id)!;
     const allRes: ResourceType[] = ['rubber', 'oil', 'gold', 'food'];
-    allRes.forEach(res => { rollingPlayer.resources[res] += 1; });
-    logs.push(generateGameLog(`🎲7！${currentPlayer.name}が全資源+1！`, 'resource', currentPlayer.id));
+    // Lucky 7: ALL players gain +1 of every resource
+    updatedPlayers.forEach(p => {
+      allRes.forEach(res => { p.resources[res] += 1; });
+    });
+    logs.push(generateGameLog(`🎲7！全プレイヤーが全資源+1！`, 'resource', currentPlayer.id));
+    logs.push(generateGameLog(`📜 ${currentPlayer.name}は歴史クイズに挑戦！`, 'info', currentPlayer.id));
 
-    const resourceGainPopups: ResourceGainPopup[] = [{
-      playerId: currentPlayer.id,
-      playerName: currentPlayer.name,
-      playerFlag: currentPlayer.flagEmoji,
-      playerColor: currentPlayer.color,
+    const resourceGainPopups: ResourceGainPopup[] = updatedPlayers.map(p => ({
+      playerId: p.id,
+      playerName: p.name,
+      playerFlag: p.flagEmoji,
+      playerColor: p.color,
       resource: 'rubber',
       amount: 1,
-    }];
+    }));
 
     set({
       diceResult: dice,
@@ -667,6 +700,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
         quizResult: null,
         quizResourcePickRemaining: 0,
         turnTimerPausedForQuiz: true,
+        quizTotalCount: state.quizTotalCount + 1,
       });
       console.log('[dismissResourceGains] phase set to quiz, currentQuiz set');
     } else {
@@ -1103,6 +1137,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
       set({
         quizResult: 'correct',
         quizResourcePickRemaining: 2,
+        quizCorrectCount: state.quizCorrectCount + 1,
         gameLog: [...state.gameLog, generateGameLog(`🎉 ${player.name}がクイズに正解！好きな資源を2つ獲得！`, 'event', player.id)],
       });
     } else {
@@ -1205,6 +1240,18 @@ export const useGameStore = create<GameStore>((set, get) => ({
   // =============================================
   doEndTurn: () => {
     const state = get();
+
+    // Track "came from behind" badge: if any human ends a turn in last place,
+    // flag it so we can award the badge if they eventually win.
+    const humanPlayers = state.players.filter(p => p.isHuman);
+    if (humanPlayers.length > 0 && !state.wasLastPlaceOnce) {
+      const minVP = Math.min(...state.players.map(p => p.victoryPoints));
+      const anyHumanLast = humanPlayers.some(p => p.victoryPoints === minVP);
+      if (anyHumanLast) {
+        set({ wasLastPlaceOnce: true });
+      }
+    }
+
     let idx = (state.currentPlayerIndex + 1) % state.players.length;
     let turn = state.currentTurn;
 
@@ -1274,14 +1321,19 @@ export const useGameStore = create<GameStore>((set, get) => ({
         const gainsSummaryParts: string[] = [];
 
         if (total === 7) {
-          // Lucky 7: rolling player gains +1 of all resources
+          // Lucky 7: ALL players gain +1 of every resource
           const allRes: ResourceType[] = ['rubber', 'oil', 'gold', 'food'];
-          allRes.forEach(res => { aiP.resources[res] += 1; });
-          const parts = allRes.map(res => `${RESOURCE_INFO[res].icon}+1`);
-          gainsSummaryParts.push(`${aiP.flagEmoji} ${parts.join(' ')}`);
+          simPlayers.forEach(p => {
+            allRes.forEach(res => { p.resources[res] += 1; });
+          });
+          // Build a per-player summary like "🇯🇵 🌿+1 🛢️+1 💰+1 🌾+1"
+          simPlayers.forEach(p => {
+            const parts = allRes.map(res => `${RESOURCE_INFO[res].icon}+1`);
+            gainsSummaryParts.push(`${p.flagEmoji} ${parts.join(' ')}`);
+          });
 
           logs.push(generateGameLog(`${aiP.name}がサイコロを振った！ 🎲 ${dice[0]}+${dice[1]}=${total}`, 'info', aiP.id));
-          logs.push(generateGameLog(`🎲7！${aiP.name}が全資源+1！`, 'resource', aiP.id));
+          logs.push(generateGameLog(`🎲7！全プレイヤーが全資源+1！`, 'resource', aiP.id));
 
           aiActions.push({
             type: 'dice_roll',
@@ -1304,80 +1356,83 @@ export const useGameStore = create<GameStore>((set, get) => ({
             playerColor: aiP.color,
           });
 
-          // Event on 7 for AI — apply directly to sim
-          const aiEvent = getRandomEvent(state.difficulty);
-          if (aiEvent) {
-            const allResTypes: ResourceType[] = ['rubber', 'oil', 'gold', 'food'];
-            let eventMsg = '';
-            let eventResultDetail = ''; // Short result for overlay display
-            if (aiEvent.effectType === 'lose_resources') {
-              const r = allResTypes[Math.floor(Math.random() * allResTypes.length)];
-              const before = aiP.resources[r];
-              const loss = Math.min(aiP.resources[r], aiEvent.effectValue);
-              aiP.resources[r] -= loss;
-              eventResultDetail = `${RESOURCE_INFO[r].icon}${RESOURCE_INFO[r].name} ${before}→${aiP.resources[r]}（-${loss}）`;
-              eventMsg = `${aiEvent.icon}${aiP.flagEmoji}${aiP.name}に${aiEvent.title}→${RESOURCE_INFO[r].icon}${RESOURCE_INFO[r].name}${loss}つ失った`;
-            } else if (aiEvent.effectType === 'lose_food') {
-              const before = aiP.resources.food;
-              const loss = Math.min(aiP.resources.food, aiEvent.effectValue);
-              aiP.resources.food -= loss;
-              eventResultDetail = `🌾食料 ${before}→${aiP.resources.food}（-${loss}）`;
-              eventMsg = `${aiEvent.icon}${aiP.flagEmoji}${aiP.name}に${aiEvent.title}→🌾食料${loss}つ失った`;
-            } else if (aiEvent.effectType === 'gain_resources') {
-              const r = allResTypes[Math.floor(Math.random() * allResTypes.length)];
-              aiP.resources[r] += aiEvent.effectValue;
-              eventResultDetail = `${RESOURCE_INFO[r].icon}${RESOURCE_INFO[r].name} +${aiEvent.effectValue}`;
-              eventMsg = `${aiEvent.icon}${aiP.flagEmoji}${aiP.name}に${aiEvent.title}→${RESOURCE_INFO[r].icon}+${aiEvent.effectValue}`;
-            } else if (aiEvent.effectType === 'gain_all') {
-              allResTypes.forEach(r => { aiP.resources[r] += aiEvent.effectValue; });
-              eventResultDetail = `🌿+1 🛢️+1 💰+1 🌾+1 全部もらった！`;
-              eventMsg = `${aiEvent.icon}${aiP.flagEmoji}${aiP.name}に${aiEvent.title}→全資源+${aiEvent.effectValue}`;
-            } else if (aiEvent.effectType === 'discount_build') {
-              const r1 = allResTypes[Math.floor(Math.random() * allResTypes.length)];
-              const r2 = allResTypes[Math.floor(Math.random() * allResTypes.length)];
-              aiP.resources[r1] += 1; aiP.resources[r2] += 1;
-              eventResultDetail = `${RESOURCE_INFO[r1].icon}+1 ${RESOURCE_INFO[r2].icon}+1`;
-              eventMsg = `${aiEvent.icon}${aiP.flagEmoji}${aiP.name}に${aiEvent.title}→${RESOURCE_INFO[r1].icon}+1 ${RESOURCE_INFO[r2].icon}+1`;
-            } else if (aiEvent.effectType === 'free_road') {
-              const validEdges = getValidRoadEdges(aiP.id, state.edges, state.vertices, simSettlements, simRoads, false);
-              if (validEdges.length > 0) {
-                simRoads.push({ edgeId: validEdges[Math.floor(Math.random() * validEdges.length)], playerId: aiP.id });
-                eventResultDetail = '🛤️道を1つ無料で建設！';
-              } else {
-                eventResultDetail = '建設できる場所がなかった';
-              }
-              eventMsg = `${aiEvent.icon}${aiP.flagEmoji}${aiP.name}に${aiEvent.title}→${eventResultDetail}`;
-            } else if (aiEvent.effectType === 'lose_structure') {
-              const mySett = simSettlements.filter(s => s.playerId === aiP.id && s.level === 'settlement');
-              if (mySett.length > 0) {
-                const target = mySett[Math.floor(Math.random() * mySett.length)];
-                const idx2 = simSettlements.findIndex(s => s.vertexId === target.vertexId && s.playerId === aiP.id);
-                if (idx2 !== -1) simSettlements.splice(idx2, 1);
-                const vpBefore = aiP.victoryPoints;
-                aiP.victoryPoints = Math.max(0, aiP.victoryPoints - 1);
-                eventResultDetail = `🏠拠点1つ失った（★${vpBefore}→${aiP.victoryPoints}）`;
-              } else {
-                eventResultDetail = '失う拠点がなかった';
-              }
-              eventMsg = `${aiEvent.icon}${aiP.flagEmoji}${aiP.name}に${aiEvent.title}→${eventResultDetail}`;
-            } else if (aiEvent.effectType === 'skip_turn') {
-              eventResultDetail = 'このターン行動できない！';
-              eventMsg = `${aiEvent.icon}${aiP.flagEmoji}${aiP.name}に${aiEvent.title}→行動スキップ`;
+          // ----- AI auto-quiz on 7 -----
+          // Pick a real quiz and push an ai_quiz action so the player sees it
+          // (QuizPopup renders the AI mode: thinking → choice → result)
+          const aiQuizPool = QUIZ_QUESTIONS.filter(q => q.difficulty === state.quizDifficulty);
+          const aiQuizQuestion = aiQuizPool.length > 0
+            ? aiQuizPool[Math.floor(Math.random() * aiQuizPool.length)]
+            : null;
+
+          // Accuracy per difficulty: easy=20%, normal=50%, hard=85%
+          const quizWinProb = state.difficulty === 'hard' ? 0.85 : state.difficulty === 'normal' ? 0.5 : 0.2;
+          const quizCorrect = Math.random() < quizWinProb;
+
+          if (aiQuizQuestion) {
+            let aiChoiceIndex: number;
+            if (quizCorrect) {
+              aiChoiceIndex = aiQuizQuestion.correctIndex;
             } else {
-              eventResultDetail = aiEvent.description;
-              eventMsg = `${aiEvent.icon}${aiP.flagEmoji}${aiP.name}に${aiEvent.title}`;
+              const wrongIndices = aiQuizQuestion.options
+                .map((_, i) => i)
+                .filter(i => i !== aiQuizQuestion.correctIndex);
+              aiChoiceIndex = wrongIndices[Math.floor(Math.random() * wrongIndices.length)];
             }
-            logs.push(generateGameLog(eventMsg, 'event', aiP.id));
+            aiActions.push({
+              type: 'ai_quiz',
+              playerId: aiP.id,
+              playerName: aiP.countryName,
+              playerFlag: aiP.flagEmoji,
+              playerColor: aiP.color,
+              quizQuestion: aiQuizQuestion,
+              quizAIChoiceIndex: aiChoiceIndex,
+              quizAICorrect: quizCorrect,
+            });
+          }
+
+          if (quizCorrect) {
+            // Pick 2 resources AI is lowest on
+            const sorted = [...allRes].sort((a, b) => aiP.resources[a] - aiP.resources[b]);
+            const picks: ResourceType[] = [sorted[0], sorted[1]];
+            picks.forEach(r => { aiP.resources[r] += 1; });
+            const pickText = picks.map(r => `${RESOURCE_INFO[r].icon}+1`).join(' ');
+            logs.push(generateGameLog(`📜 ${aiP.name}は歴史クイズに正解！${pickText}`, 'event', aiP.id));
             aiActions.push({
               type: 'event',
               playerId: aiP.id,
               playerName: aiP.countryName,
               playerFlag: aiP.flagEmoji,
               playerColor: aiP.color,
-              eventTitle: aiEvent.title,
-              eventIcon: aiEvent.icon,
-              eventCategory: aiEvent.category,
-              eventDetail: eventResultDetail,
+              eventTitle: '歴史クイズ正解！',
+              eventIcon: '📜',
+              eventCategory: 'positive',
+              eventDetail: `${pickText} をゲット！`,
+            });
+          } else {
+            // Pick 2 random resources AI currently has; deduct 1 each
+            const ownedRes = allRes.filter(r => aiP.resources[r] > 0);
+            const losses: ResourceType[] = [];
+            for (let i = 0; i < 2 && ownedRes.length > 0; i++) {
+              const idx = Math.floor(Math.random() * ownedRes.length);
+              const r = ownedRes[idx];
+              aiP.resources[r] -= 1;
+              losses.push(r);
+              if (aiP.resources[r] <= 0) ownedRes.splice(idx, 1);
+            }
+            const lossText = losses.length > 0
+              ? losses.map(r => `${RESOURCE_INFO[r].icon}-1`).join(' ')
+              : '失う資源がなかった';
+            logs.push(generateGameLog(`📜 ${aiP.name}は歴史クイズに不正解... ${lossText}`, 'event', aiP.id));
+            aiActions.push({
+              type: 'event',
+              playerId: aiP.id,
+              playerName: aiP.countryName,
+              playerFlag: aiP.flagEmoji,
+              playerColor: aiP.color,
+              eventTitle: '歴史クイズ不正解...',
+              eventIcon: '💥',
+              eventCategory: 'negative',
+              eventDetail: lossText,
             });
           }
         } else {
@@ -1722,6 +1777,12 @@ export const useGameStore = create<GameStore>((set, get) => ({
         currentAIAction: action,
         aiActionQueue: queue,
         highlightedTileIds: [],
+      });
+    } else if (action.type === 'ai_quiz') {
+      // Resources are already applied in sim; the UI popup is purely cosmetic.
+      set({
+        currentAIAction: action,
+        aiActionQueue: queue,
       });
     } else if (action.type === 'build_settlement' && action.vertexId) {
       const cost = BUILD_COSTS.settlement;
