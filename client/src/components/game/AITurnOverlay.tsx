@@ -8,15 +8,22 @@ import { useGameStore, type AIAction } from '@/lib/gameStore';
 import { RESOURCE_INFO } from '@/lib/gameTypes';
 
 // Duration for each action display (ms)
+// Durations cut ~30% from previous values for snappier AI playback.
 const ACTION_DURATIONS: Record<AIAction['type'], number> = {
-  turn_start: 1500,
-  dice_roll: 2200,
-  resource_gain: 1500,
-  no_resource: 1200,
-  build_settlement: 1800,
-  upgrade_city: 1800,
-  build_road: 1500,
-  turn_end: 800,
+  turn_start: 1050,
+  dice_roll: 1550,
+  resource_gain: 1050,
+  dice_gains: 1250,
+  lucky_seven: 1400,
+  no_resource: 850,
+  build_settlement: 1250,
+  upgrade_city: 1250,
+  build_road: 1050,
+  event: 1550,
+  event_card: 2800,
+  turn_end: 550,
+  // AI quiz: 1.05s thinking + 1.05s answer reveal + 1.05s result = ~3150ms
+  ai_quiz: 3150,
 };
 
 function DiceFace({ value }: { value: number }) {
@@ -94,6 +101,26 @@ function ActionContent({ action }: { action: AIAction }) {
               </>
             )}
           </div>
+          {action.gainsSummary && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.7 }}
+              className="text-base font-bold text-emerald-700 bg-emerald-50 rounded-lg px-3 py-1.5 border border-emerald-200"
+            >
+              → {action.gainsSummary}
+            </motion.div>
+          )}
+          {!action.gainsSummary && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ delay: 0.7 }}
+              className="text-sm text-gray-500"
+            >
+              資源獲得なし
+            </motion.div>
+          )}
         </div>
       );
 
@@ -128,6 +155,68 @@ function ActionContent({ action }: { action: AIAction }) {
       );
     }
 
+    case 'dice_gains': {
+      // Group gains by player
+      const gainsByPlayer = new Map<string, string[]>();
+      (action.diceGains || []).forEach(g => {
+        const list = gainsByPlayer.get(g.playerId) || [];
+        list.push(`${RESOURCE_INFO[g.resource].icon}+${g.amount}`);
+        gainsByPlayer.set(g.playerId, list);
+      });
+      const { players } = useGameStore.getState();
+      return (
+        <div className="text-center py-2">
+          <div className="text-sm text-amber-700 font-bold mb-2">資源獲得！</div>
+          <div className="space-y-1.5">
+            {Array.from(gainsByPlayer.entries()).map(([pid, parts]) => {
+              const p = players.find(pp => pp.id === pid);
+              return (
+                <motion.div
+                  key={pid}
+                  initial={{ opacity: 0 }}
+                  animate={{ x: 0, opacity: 1 }}
+                  className="flex items-center gap-2 bg-white/80 rounded-lg px-3 py-1.5 text-sm"
+                  style={{ borderLeft: `4px solid ${p?.color || '#888'}` }}
+                >
+                  <span className="text-base">{p?.flagEmoji}</span>
+                  <span className="font-bold text-amber-900">{p?.name}</span>
+                  <span className="ml-auto font-bold text-emerald-700">{parts.join(' ')}</span>
+                </motion.div>
+              );
+            })}
+          </div>
+        </div>
+      );
+    }
+
+    case 'lucky_seven':
+      return (
+        <div className="text-center py-2">
+          <div className="text-sm text-amber-700 font-bold mb-2">
+            {action.playerFlag} {action.playerName}
+          </div>
+          <motion.div
+            initial={{ scale: 0, rotate: -20 }}
+            animate={{ scale: [0, 1.3, 1], rotate: 0 }}
+            transition={{ type: 'spring', stiffness: 200 }}
+            className="text-5xl mb-3"
+          >
+            🎉
+          </motion.div>
+          <div className="text-xl font-heading font-bold text-amber-900 mb-2">
+            ラッキー7！全資源+1！
+          </div>
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.4 }}
+            className="text-lg font-bold text-emerald-700 bg-emerald-50 rounded-lg px-4 py-2 border border-emerald-200 inline-block"
+          >
+            🌿+1 🛢️+1 💰+1 🌾+1
+          </motion.div>
+        </div>
+      );
+
     case 'no_resource':
       return (
         <div className="text-center py-2">
@@ -148,7 +237,7 @@ function ActionContent({ action }: { action: AIAction }) {
             {action.playerFlag} {action.playerName}
           </div>
           <motion.div
-            initial={{ x: -30, opacity: 0 }}
+            initial={{ opacity: 0 }}
             animate={{ x: 0, opacity: 1 }}
             transition={{ type: 'spring', stiffness: 200 }}
             className="text-5xl mb-3"
@@ -173,7 +262,7 @@ function ActionContent({ action }: { action: AIAction }) {
             {action.playerFlag} {action.playerName}
           </div>
           <motion.div
-            initial={{ y: 40, opacity: 0 }}
+            initial={{ opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
             transition={{ type: 'spring', stiffness: 200 }}
             className="text-5xl mb-3"
@@ -215,6 +304,74 @@ function ActionContent({ action }: { action: AIAction }) {
           </motion.div>
         </div>
       );
+
+    case 'event': {
+      const isPositiveEvent = action.eventCategory === 'positive';
+      return (
+        <motion.div
+          animate={!isPositiveEvent ? { x: [0, -4, 4, -3, 3, -1, 1, 0] } : {}}
+          transition={{ duration: 0.4, delay: 0.2 }}
+          className="text-center py-2"
+        >
+          {/* Player label */}
+          <div className="text-sm font-bold mb-2" style={{ color: action.playerColor }}>
+            {action.playerFlag} {action.playerName}
+          </div>
+
+          {/* Large event icon */}
+          <motion.div
+            initial={{ scale: 0, rotate: -20 }}
+            animate={{ scale: [0, 1.3, 1], rotate: 0 }}
+            transition={{ type: 'spring', stiffness: 200 }}
+            className="text-6xl mb-2"
+          >
+            {action.eventIcon || '⚡'}
+          </motion.div>
+
+          {/* Event category badge */}
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.15 }}
+            className={`inline-block text-[10px] font-bold px-2 py-0.5 rounded-full mb-2 ${
+              isPositiveEvent
+                ? 'bg-emerald-100 text-emerald-700 border border-emerald-300'
+                : 'bg-red-100 text-red-700 border border-red-300'
+            }`}
+          >
+            {isPositiveEvent ? '✨ ボーナス' : '⚠️ トラブル'}
+          </motion.div>
+
+          {/* Event title */}
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 0.25 }}
+            className={`text-xl font-heading font-bold mb-2 ${
+              isPositiveEvent ? 'text-emerald-700' : 'text-red-700'
+            }`}
+          >
+            {action.eventTitle}
+          </motion.div>
+
+          {/* Event result detail */}
+          {action.eventDetail && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.5 }}
+              className={`text-base font-bold rounded-xl px-4 py-2 border ${
+                isPositiveEvent
+                  ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                  : 'bg-red-50 text-red-800 border-red-200'
+              }`}
+            >
+              {action.eventDetail}
+            </motion.div>
+          )}
+        </motion.div>
+      );
+    }
 
     case 'turn_end':
       return (
@@ -318,16 +475,15 @@ export default function AITurnOverlay() {
         className="absolute inset-0 bg-black/40 pointer-events-auto"
       />
 
-      {/* Action card */}
-      <AnimatePresence mode="wait">
-        {currentAIAction && (
+      {/* Action card — hidden during ai_quiz (QuizPopup takes over) */}
+      <AnimatePresence mode="sync">
+        {currentAIAction && currentAIAction.type !== 'ai_quiz' && (
           <motion.div
             key={`${currentAIAction.type}-${currentAIAction.playerId}-${aiQueueLength}`}
-            initial={{ opacity: 0, scale: 0.7, y: 30 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.9, y: -30 }}
-            transition={{ type: 'spring', stiffness: 300, damping: 25 }}
-            className="relative z-10 bg-amber-50 rounded-2xl p-8 mx-4 min-w-[300px] max-w-[380px] shadow-2xl border-2 border-amber-200"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1, transition: { duration: 0.4, ease: 'easeOut' } }}
+            exit={{ opacity: 0, transition: { duration: 0.2, ease: 'easeIn' } }}
+            className="relative z-10 bg-amber-50 rounded-2xl p-8 mx-4 min-w-[300px] max-w-[380px] shadow-2xl border-2"
             style={{
               borderTop: `5px solid ${currentAIAction.playerColor}`,
               background: 'linear-gradient(180deg, #fffbeb 0%, #fef3c7 100%)',

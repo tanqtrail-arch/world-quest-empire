@@ -4,11 +4,13 @@
  * 新しいログエントリーにはフェードインアニメーション付き
  */
 import { useGameStore } from '@/lib/gameStore';
-import { useRef, useEffect, useState } from 'react';
+import { useRef, useEffect, useState, memo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 
-export default function GameLog() {
-  const { gameLog, players } = useGameStore();
+function GameLog() {
+  console.count('[render] GameLog');
+  const gameLog = useGameStore(s => s.gameLog);
+  const players = useGameStore(s => s.players);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [prevLength, setPrevLength] = useState(0);
 
@@ -82,3 +84,5 @@ export default function GameLog() {
     </div>
   );
 }
+
+export default memo(GameLog);

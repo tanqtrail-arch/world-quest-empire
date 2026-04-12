@@ -13,6 +13,8 @@ import PlayerPanel from '@/components/game/PlayerPanel';
 import DiceRoller from '@/components/game/DiceRoller';
 import ActionMenu from '@/components/game/ActionMenu';
 import EventPopup from '@/components/game/EventPopup';
+import EventCardDisplay from '@/components/game/EventCardDisplay';
+import QuizPopup from '@/components/game/QuizPopup';
 import GameLog from '@/components/game/GameLog';
 import AITurnOverlay from '@/components/game/AITurnOverlay';
 import ResourcePopup from '@/components/game/ResourcePopup';
@@ -62,9 +64,34 @@ function TileHelpTooltip({ onClose }: { onClose: () => void }) {
   );
 }
 
+// Event card 3D flip host — shows human's drawn card (phase==='event') or AI's drawn card
+function EventCardDisplayHost() {
+  console.count('[render] EventCardDisplayHost');
+  const phase = useGameStore(s => s.phase);
+  const currentEvent = useGameStore(s => s.currentEvent);
+  const currentAIAction = useGameStore(s => s.currentAIAction);
+  const handleEvent = useGameStore(s => s.handleEvent);
+  const resourcePickMode = useGameStore(s => s.resourcePickMode);
+
+  // Priority 1: human event card
+  if (phase === 'event' && currentEvent && !resourcePickMode) {
+    return <EventCardDisplay card={currentEvent} onDismiss={handleEvent} />;
+  }
+
+  // Priority 2: AI event card action
+  if (currentAIAction?.type === 'event_card' && currentAIAction.eventCard) {
+    return <EventCardDisplay card={currentAIAction.eventCard} />;
+  }
+
+  return null;
+}
+
 // Handoff screen for local multiplayer
 function HandoffOverlay() {
-  const { phase, players, handoffPlayerIndex, confirmHandoff } = useGameStore();
+  const phase = useGameStore(s => s.phase);
+  const players = useGameStore(s => s.players);
+  const handoffPlayerIndex = useGameStore(s => s.handoffPlayerIndex);
+  const confirmHandoff = useGameStore(s => s.confirmHandoff);
 
   if (phase !== 'handoff' || handoffPlayerIndex === null) return null;
 
@@ -109,8 +136,77 @@ function HandoffOverlay() {
   );
 }
 
+/* ---- Turn Timer Display ---- */
+function TurnTimerDisplay() {
+  const turnTimeRemaining = useGameStore(s => s.turnTimeRemaining);
+  const turnTimerActive = useGameStore(s => s.turnTimerActive);
+  const timerEnabled = useGameStore(s => s.timerEnabled);
+  const isPlayingAI = useGameStore(s => s.isPlayingAI);
+  const phase = useGameStore(s => s.phase);
+  const tickTurnTimer = useGameStore(s => s.tickTurnTimer);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    if (timerEnabled && turnTimerActive) {
+      timerRef.current = setInterval(() => {
+        tickTurnTimer();
+      }, 1000);
+    }
+    return () => {
+      if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
+    };
+  }, [timerEnabled, turnTimerActive, tickTurnTimer]);
+
+  if (!timerEnabled || isPlayingAI || phase === 'setup' || phase === 'finished' || phase === 'handoff') {
+    return null;
+  }
+
+  const radius = 18;
+  const circumference = 2 * Math.PI * radius;
+  const progress = turnTimeRemaining / TURN_TIMER_SECONDS;
+  const dashOffset = circumference * (1 - progress);
+
+  const isYellow = turnTimeRemaining <= 15 && turnTimeRemaining > 5;
+  const isRed = turnTimeRemaining <= 5;
+  const strokeColor = isRed ? '#EF4444' : isYellow ? '#F59E0B' : '#3B82F6';
+  const textColor = isRed ? 'text-red-500' : isYellow ? 'text-amber-500' : 'text-blue-500';
+
+  return (
+    <motion.div
+      animate={isRed ? { scale: [1, 1.05, 1] } : {}}
+      transition={isRed ? { duration: 0.5, repeat: Infinity } : {}}
+      className="absolute top-2 left-2 z-30"
+    >
+      <div className="relative w-11 h-11 md:w-12 md:h-12">
+        <svg className="w-full h-full -rotate-90" viewBox="0 0 44 44">
+          <circle cx="22" cy="22" r={radius} fill="rgba(0,0,0,0.4)" stroke="#ffffff33" strokeWidth={3} />
+          <circle
+            cx="22" cy="22" r={radius} fill="none"
+            stroke={strokeColor}
+            strokeWidth={3}
+            strokeDasharray={circumference}
+            strokeDashoffset={dashOffset}
+            strokeLinecap="round"
+            style={{ transition: 'stroke-dashoffset 1s linear, stroke 0.3s' }}
+          />
+        </svg>
+        <div className="absolute inset-0 flex items-center justify-center">
+          <span className={`font-score font-bold text-xs md:text-sm ${textColor}`}>
+            {turnTimeRemaining}
+          </span>
+        </div>
+      </div>
+    </motion.div>
+  );
+}
+
 export default function GameScreen() {
-  const { phase, isPlayingAI, currentAIAction, setupPhase, players } = useGameStore();
+  console.count('[render] GameScreen');
+  const phase = useGameStore(s => s.phase);
+  const isPlayingAI = useGameStore(s => s.isPlayingAI);
+  const currentAIAction = useGameStore(s => s.currentAIAction);
+  const setupPhase = useGameStore(s => s.setupPhase);
+  const players = useGameStore(s => s.players);
   const [showHelp, setShowHelp] = useState(false);
 
   const isSetup = phase === 'setup';
@@ -210,8 +306,14 @@ export default function GameScreen() {
       {/* Resource Gain Popup */}
       <ResourcePopup />
 
-      {/* Event Popup Overlay */}
+      {/* Event Popup Overlay (handles resource-pick UI after EventCardDisplay) */}
       <EventPopup />
+
+      {/* Event Card 3D flip display (replaces legacy card face) */}
+      <EventCardDisplayHost />
+
+      {/* Quiz Popup Overlay */}
+      <QuizPopup />
 
       {/* Handoff Overlay for local multiplayer */}
       <AnimatePresence>

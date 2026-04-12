@@ -3,7 +3,7 @@
  * Design: 大きなサイコロボタン、結果表示
  * - 資源獲得の詳細表示はHexMapのDiceResultZoomに委譲
  */
-import { useState } from 'react';
+import { useState, memo } from 'react';
 import { useGameStore } from '@/lib/gameStore';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -49,8 +49,15 @@ function DiceFace({ value, size = 52 }: { value: number; size?: number }) {
   );
 }
 
-export default function DiceRoller() {
-  const { phase, diceResult, doRollDice } = useGameStore();
+function DiceRoller() {
+  console.count('[render] DiceRoller');
+  const phase = useGameStore(s => s.phase);
+  const diceResult = useGameStore(s => s.diceResult);
+  const doRollDice = useGameStore(s => s.doRollDice);
+  const doForceSevenDice = useGameStore(s => s.doForceSevenDice);
+  const players = useGameStore(s => s.players);
+  const currentPlayerIndex = useGameStore(s => s.currentPlayerIndex);
+  const usedGoldDice = useGameStore(s => s.usedGoldDice);
   const [isRolling, setIsRolling] = useState(false);
 
   const handleRoll = () => {
@@ -120,3 +127,5 @@ export default function DiceRoller() {
     </div>
   );
 }
+
+export default memo(DiceRoller);

@@ -258,6 +258,7 @@ export default function EventCardDisplay({
   onDismiss,
   autoFlipDelay = 600,
 }: EventCardDisplayProps) {
+  console.count('[render] EventCardDisplay');
   const [isFlipped, setIsFlipped] = useState(false);
   const [isVisible, setIsVisible] = useState(false);
 

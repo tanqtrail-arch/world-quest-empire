@@ -94,8 +94,8 @@ export interface EventCard {
   effectValue: number;
   icon: string;
   learningPoint: string;
-  duration?: number;
-  requiresChoice?: boolean;
+  duration?: number;       // 何ターン持続するか（指定なければ即時）
+  requiresChoice?: boolean; // 好きな資源を選ぶ系
 }
 
 // --- Game Phase ---
@@ -220,5 +220,5 @@ export const TILE_DISTRIBUTION: TileType[] = [
 export const DICE_NUMBERS = [2, 3, 3, 4, 4, 5, 5, 6, 6, 8, 8, 9, 9, 10, 10, 11, 11, 12];
 
 // --- Event Cards Data ---
-// 新イベントカードシステムは client/src/lib/eventCards.ts に定義
+// EVENT_CARDS is now defined in './eventCards.ts'. Re-export for backwards compat.
 export { EVENT_CARDS } from './eventCards';
