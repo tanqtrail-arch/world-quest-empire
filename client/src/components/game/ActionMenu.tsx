@@ -258,7 +258,7 @@ function TradePanel({ onClose }: { onClose: () => void }) {
   const currentPlayerIndex = useGameStore(s => s.currentPlayerIndex);
   const doTrade = useGameStore(s => s.doTrade);
   const settlements = useGameStore(s => s.settlements);
-  const ports = useGameStore(s => s.ports);
+  const ports = useGameStore(s => s.ports) ?? [];
   const player = players[currentPlayerIndex];
   const resources: ResourceType[] = ['rubber', 'oil', 'gold', 'food'];
   const [giveRes, setGiveRes] = useState<ResourceType | null>(null);

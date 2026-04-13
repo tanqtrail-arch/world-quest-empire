@@ -4,8 +4,9 @@ import {
   type Player, type GameTile, type Vertex, type Edge,
   type Settlement, type Road, type Resources, type ResourceType,
   type EventCard, type GameLogEntry, type Difficulty, type GamePhase,
-  type SetupStep, type PlayerSlot,
+  type SetupStep, type PlayerSlot, type QuizQuestion, type Port,
   BUILD_COSTS, VP_VALUES, WINNING_SCORE, PLAYER_COLORS,
+  RESOURCE_INFO, TURN_TIMER_SECONDS,
 } from './gameTypes';
 import { EVENT_CARDS } from './eventCards';
 import { applyEventEffect, type EffectContext } from './eventCardEffects';
@@ -138,6 +139,38 @@ interface GameStore {
   // Handoff (local multiplayer)
   handoffPlayerIndex: number | null;
 
+  // Ports
+  ports: Port[];
+
+  // Dynamic map rows (for variable board sizes)
+  mapRows: number[] | undefined;
+
+  // Dice animation
+  diceAnimationStep: 0 | 1 | 2 | 3 | 4;
+
+  // Event resource pick mode
+  resourcePickMode: { remaining: number; eventTitle: string } | null;
+  eventEffectPreview: string | null;
+
+  // Gold dice
+  usedGoldDice: boolean;
+  sevensRolledCount: number;
+
+  // Quiz
+  currentQuiz: QuizQuestion | null;
+  quizResult: 'correct' | 'incorrect' | 'timeout' | null;
+  quizResourcePickRemaining: number;
+  quizCorrectCount: number;
+  turnTimerPausedForQuiz: boolean;
+
+  // Turn timer
+  timerEnabled: boolean;
+  turnTimerActive: boolean;
+  turnTimeRemaining: number;
+
+  // Tracking
+  wasLastPlaceOnce: boolean;
+
   // Actions
   initGame: (slots: PlayerSlot[], difficulty: Difficulty) => void;
   doRollDice: () => void;
@@ -167,6 +200,18 @@ interface GameStore {
   cardPickerSelect: (card: EventCard) => void;
   cardPickerRedraw: () => void;
   cardPickerSkip: () => void;
+
+  // Gold dice
+  doForceSevenDice: () => void;
+
+  // Quiz
+  handleQuizAnswer: (selectedIndex: number) => void;
+  handleQuizTimeout: () => void;
+  pickQuizReward: (resource: ResourceType) => void;
+  dismissQuiz: () => void;
+
+  // Turn timer
+  tickTurnTimer: () => void;
 }
 
 export const useGameStore = create<GameStore>((set, get) => ({
@@ -217,6 +262,23 @@ export const useGameStore = create<GameStore>((set, get) => ({
   stageMode: null,
   stageClearStars: 0,
   cardPickerMode: null,
+
+  ports: [],
+  mapRows: undefined,
+  diceAnimationStep: 0,
+  resourcePickMode: null,
+  eventEffectPreview: null,
+  usedGoldDice: false,
+  sevensRolledCount: 0,
+  currentQuiz: null,
+  quizResult: null,
+  quizResourcePickRemaining: 0,
+  quizCorrectCount: 0,
+  turnTimerPausedForQuiz: false,
+  timerEnabled: false,
+  turnTimerActive: false,
+  turnTimeRemaining: TURN_TIMER_SECONDS,
+  wasLastPlaceOnce: false,
 
   // =============================================
   // INIT GAME
@@ -598,13 +660,13 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
     set({
       diceResult: dice,
-      phase: event ? 'action' : 'action',
-      players: newPlayers,
+      phase: 'action',
+      players: updatedPlayers,
       gameLog: [...state.gameLog, ...logs],
-      highlightedTileIds: matchingTileIds,
+      highlightedTileIds: [],
       showResourceGains: true,
       resourceGains: resourceGainPopups,
-      pendingEvent: event || null,
+      pendingEvent: null,
     });
 
     diceAnimationTimers.push(setTimeout(() => {
@@ -1214,11 +1276,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
             p.resources.gold += 1;
             p.resources.food += 1;
           });
-          // Build a per-player summary like "🇯🇵 🌿+1 🛢️+1 💰+1 🌾+1"
-          simPlayers.forEach(p => {
-            const parts = allRes.map(res => `${RESOURCE_INFO[res].icon}+1`);
-            gainsSummaryParts.push(`${p.flagEmoji} ${parts.join(' ')}`);
-          });
+          // Lucky 7 log for AI
+          logs.push(generateGameLog(`🎲7！全プレイヤーが全資源+1！`, 'resource', aiP.id));
         }
 
         logs.push(generateGameLog(`${aiP.name}がサイコロを振った！ 🎲 ${dice[0]} + ${dice[1]} = ${total}`, 'info', aiP.id));
@@ -1311,7 +1370,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
           }
           if (a.type === 'trade') {
             if (a.tradeFrom && a.tradeTo) {
-              const tradeRate = getTradeRate(aiP.id, a.tradeFrom, simSettlements, state.ports);
+              const tradeRate = 4; // default 4:1 trade
               if (aiP.resources[a.tradeFrom] < tradeRate) {
                 return;
               }

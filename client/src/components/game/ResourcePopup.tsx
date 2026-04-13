@@ -49,7 +49,7 @@ export default function ResourcePopup() {
 
   // Track current player's own turn resource gains
   useEffect(() => {
-    if (!showResourceGains || !resourceGains.length || !currentPlayer) return;
+    if (!showResourceGains || !resourceGains?.length || !currentPlayer) return;
 
     const playerGains = resourceGains.filter(g => g.playerId === currentPlayer.id);
     if (playerGains.length === 0) return;

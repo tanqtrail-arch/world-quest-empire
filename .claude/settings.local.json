@@ -1,0 +1,36 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(rm -f client/src/components/ManusDialog.tsx)",
+      "Bash(rm -rf client/public/__manus__)",
+      "Bash(timeout 15 pnpm dev)",
+      "Bash(curl -L -o client/public/game-board-bg.webp 'https://d2xsxph8kpxj0f.cloudfront.net/310519663286960690/RthryRhRZNJvzXLKUFJiBd/game-board-bg-8s6c49wGQN8mc2Rzb2agwx.webp')",
+      "Bash(npx wrangler:*)",
+      "Bash(curl -L -o client/public/hero-bg.webp 'https://d2xsxph8kpxj0f.cloudfront.net/310519663286960690/RthryRhRZNJvzXLKUFJiBd/hero-bg-JDykZ5tdFBU7vL2qTmUcmb.webp')",
+      "Bash(curl -L -o client/public/title-banner.webp 'https://d2xsxph8kpxj0f.cloudfront.net/310519663286960690/RthryRhRZNJvzXLKUFJiBd/title-banner-JMEVasTGYkPM5xtrDuLWqd.webp')",
+      "Bash(curl -L -o client/public/wood-texture.webp 'https://d2xsxph8kpxj0f.cloudfront.net/310519663286960690/RthryRhRZNJvzXLKUFJiBd/wood-texture-3bU4G8nuC3Js3NFmH6shph.webp')",
+      "Bash(timeout 10 pnpm dev)",
+      "Bash(timeout 20 pnpm dev)",
+      "Bash(node:*)",
+      "Bash(xargs grep:*)",
+      "Bash(npx pnpm:*)",
+      "Bash(tasklist)",
+      "Bash(taskkill //F //IM node.exe)",
+      "Bash(npm run:*)",
+      "Bash(git add:*)",
+      "Bash(git commit -m ':*)",
+      "Bash(git push:*)",
+      "Bash(ls:*)",
+      "Bash(pnpm -s exec tsc --noEmit)",
+      "Bash(pnpm dev:*)",
+      "Bash(git log:*)",
+      "Bash(pnpm check:*)",
+      "Bash(npx vite:*)",
+      "Bash(curl -s http://localhost:5173)",
+      "Bash(curl -s http://localhost:3000)",
+      "WebFetch(domain:localhost)",
+      "Bash(curl -s http://localhost:3003)",
+      "Bash(grep -v \"^--$\")"
+    ]
+  }
+}

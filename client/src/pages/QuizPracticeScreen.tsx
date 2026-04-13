@@ -35,7 +35,7 @@ interface PracticeStats {
 }
 
 const defaultStats: PracticeStats = {
-  bestRate: { elementary_low: 0, elementary_high: 0, junior_high: 0 },
+  bestRate: { easy: 0, normal: 0, hard: 0 },
   totalAnswered: 0,
   totalCorrect: 0,
   byCategory: {
@@ -151,7 +151,7 @@ function getTitle(rate: number): { emoji: string; title: string; subtitle: strin
 export default function QuizPracticeScreen() {
   const setScreen = useGameStore(s => s.setScreen);
 
-  const [difficulty, setDifficulty] = useState<QuizDifficulty>('elementary_high');
+  const [difficulty, setDifficulty] = useState<QuizDifficulty>('normal');
   const [category, setCategory] = useState<Category>('all');
   const [stats, setStats] = useState<PracticeStats>(() => loadStats());
 
@@ -171,7 +171,7 @@ export default function QuizPracticeScreen() {
 
   // Build a fresh queue whenever difficulty/category changes
   const startSession = useCallback(() => {
-    const pool = QUIZ_QUESTIONS.filter(q =>
+    const pool = QUIZ_QUESTIONS.filter((q: QuizQuestion) =>
       q.difficulty === difficulty && (category === 'all' || q.category === category)
     );
     const shuffled = shuffle(pool).slice(0, Math.min(SESSION_SIZE, pool.length));
@@ -194,7 +194,7 @@ export default function QuizPracticeScreen() {
     if (timerRef.current) clearInterval(timerRef.current);
     setTimeRemaining(QUIZ_TIMER_SECONDS);
     timerRef.current = setInterval(() => {
-      setTimeRemaining(prev => {
+      setTimeRemaining((prev: number) => {
         if (prev <= 1) {
           if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
           return 0;
@@ -241,9 +241,9 @@ export default function QuizPracticeScreen() {
         totalCorrect: prev.totalCorrect + (isCorrect ? 1 : 0),
         byCategory: {
           ...prev.byCategory,
-          [current.category]: {
-            answered: prev.byCategory[current.category].answered + 1,
-            correct: prev.byCategory[current.category].correct + (isCorrect ? 1 : 0),
+          [current.category as string]: {
+            answered: (prev.byCategory as any)[current.category as string]?.answered + 1 || 1,
+            correct: (prev.byCategory as any)[current.category as string]?.correct + (isCorrect ? 1 : 0) || (isCorrect ? 1 : 0),
           },
         },
         bestRate: { ...prev.bestRate },
@@ -513,7 +513,7 @@ export default function QuizPracticeScreen() {
 
                   {/* Options */}
                   <div className="space-y-1.5 mb-3">
-                    {current.options.map((opt, i) => {
+                    {current.options.map((opt: string, i: number) => {
                       const isCorrectOpt = i === current.correctIndex;
                       const isSelected = selectedIndex === i;
                       let btnStyle = 'bg-white border-2 border-blue-300 text-blue-900 hover:bg-blue-50 active:scale-[0.98]';

@@ -59,7 +59,7 @@ function OpponentBar() {
       const timer = setTimeout(() => setChangedMap({}), 1200);
       return () => clearTimeout(timer);
     }
-  }, [opponents.map(o => `${o.id}-${o.resources.rubber}-${o.resources.oil}-${o.resources.gold}-${o.resources.food}`).join(',')]);
+  }, [(opponents ?? []).map(o => `${o.id}-${o.resources.rubber}-${o.resources.oil}-${o.resources.gold}-${o.resources.food}`).join(',')]);
 
   // Show resource gain popups for opponents
   useEffect(() => {
@@ -81,7 +81,7 @@ function OpponentBar() {
 
   // Also show popups from dice roll resource gains
   useEffect(() => {
-    if (!showResourceGains || !resourceGains.length) return;
+    if (!showResourceGains || !resourceGains?.length) return;
 
     const newPopups = resourceGains
       .filter(g => opponents.some(o => o.id === g.playerId))

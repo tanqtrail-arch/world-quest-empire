@@ -19,7 +19,8 @@ import GameLog from '@/components/game/GameLog';
 import AITurnOverlay from '@/components/game/AITurnOverlay';
 import ResourcePopup from '@/components/game/ResourcePopup';
 import { useGameStore } from '@/lib/gameStore';
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import { TURN_TIMER_SECONDS } from '@/lib/gameTypes';
 import { motion, AnimatePresence } from 'framer-motion';
 import { HelpCircle, X } from 'lucide-react';
 

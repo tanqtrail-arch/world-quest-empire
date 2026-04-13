@@ -99,16 +99,39 @@ export interface EventCard {
 }
 
 // --- Game Phase ---
-export type GamePhase = 
+export type GamePhase =
   | 'setup'       // 初期配置フェーズ
   | 'rolling'
   | 'action'
   | 'building'
   | 'trading'
   | 'event'
+  | 'quiz'        // 歴史クイズ表示中
   | 'ai_turn'
   | 'handoff'     // ローカル対戦: 端末渡し画面
   | 'finished';
+
+// --- Quiz ---
+export interface QuizQuestion {
+  id: string;
+  question: string;
+  options: string[];
+  correctIndex: number;
+  explanation: string;
+  category?: string;
+  difficulty?: Difficulty;
+}
+
+// --- Port ---
+export interface Port {
+  id: string;
+  type: 'general' | ResourceType;
+  vertexIds: [string, string];
+}
+
+// --- Quiz constants ---
+export const QUIZ_TIMER_SECONDS = 30;
+export const TURN_TIMER_SECONDS = 60;
 
 // --- Setup Sub-Phase ---
 export type SetupStep = 'place_settlement' | 'place_road';
@@ -222,3 +245,14 @@ export const DICE_NUMBERS = [2, 3, 3, 4, 4, 5, 5, 6, 6, 8, 8, 9, 9, 10, 10, 11, 
 // --- Event Cards Data ---
 // EVENT_CARDS is now defined in './eventCards.ts'. Re-export for backwards compat.
 export { EVENT_CARDS } from './eventCards';
+
+// --- Quiz Data (stub for QuizPracticeScreen) ---
+export type QuizDifficulty = Difficulty;
+
+export const QUIZ_DIFFICULTY_INFO: Record<QuizDifficulty, { label: string; icon: string; color: string }> = {
+  easy:   { label: 'かんたん',   icon: '⭐',     color: '#27AE60' },
+  normal: { label: 'ふつう',     icon: '⭐⭐',   color: '#F39C12' },
+  hard:   { label: 'むずかしい', icon: '⭐⭐⭐', color: '#E74C3C' },
+};
+
+export const QUIZ_QUESTIONS: QuizQuestion[] = [];

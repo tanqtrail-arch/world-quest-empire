@@ -285,7 +285,7 @@ function AIQuizView() {
             </p>
 
             <div className="space-y-1.5 mb-2">
-              {question.options.map((option, i) => {
+              {question.options.map((option: string, i: number) => {
                 const isThisCorrect = i === correctIndex;
                 const isAISelected = i === aiChoiceIndex;
                 let btnStyle = 'bg-white border-2 border-blue-300 text-blue-900';
@@ -590,7 +590,7 @@ function QuizPopupInner() {
 
                   {/* Options */}
                   <div className="space-y-1.5 mb-2">
-                    {currentQuiz.options.map((option, i) => {
+                    {currentQuiz.options.map((option: string, i: number) => {
                       const isThisCorrect = i === currentQuiz.correctIndex;
                       const isThisSelected = selectedIndex === i;
                       let btnStyle = 'bg-white border-2 border-blue-300 text-blue-900 hover:bg-blue-50 active:scale-[0.98]';

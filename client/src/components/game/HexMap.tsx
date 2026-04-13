@@ -7,7 +7,7 @@
  * - サイコロ出目時に該当タイルをハイライト
  */
 import { useGameStore } from '@/lib/gameStore';
-import { TILE_INFO, RESOURCE_INFO, type ResourceType, type TileType, type GameTile, type EventCard } from '@/lib/gameTypes';
+import { TILE_INFO, RESOURCE_INFO, type ResourceType, type TileType, type GameTile, type EventCard, type Port } from '@/lib/gameTypes';
 import { getValidSettlementVertices, getValidRoadEdges } from '@/lib/gameLogic';
 import {
   HEX_SIZE, SVG_WIDTH, SVG_HEIGHT,
@@ -141,6 +141,7 @@ const HexTile = memo(function HexTile({ tile, cx, cy, isHighlighted, isDimmed }:
   cx: number;
   cy: number;
   isHighlighted: boolean;
+  isDimmed?: boolean;
 }) {
   const resInfo = tile.type !== 'sea' && tile.type !== 'desert' ? RESOURCE_INFO[tile.type as ResourceType] : null;
 
@@ -326,7 +327,7 @@ const PortsLayer = memo(function PortsLayer({
         const pal = palettes[port.type] || palettes.general;
         const rateLabel = port.type === 'general' ? '3:1' : `${pal.icon}2:1`;
 
-        const isMyPort = !!(currentPlayerId && port.vertexIds.some(vid =>
+        const isMyPort = !!(currentPlayerId && port.vertexIds.some((vid: string) =>
           settlements.some(s => s.vertexId === vid && s.playerId === currentPlayerId)
         ));
 
@@ -600,7 +601,7 @@ function HexMap() {
   const edges = useGameStore(s => s.edges);
   const settlements = useGameStore(s => s.settlements);
   const roads = useGameStore(s => s.roads);
-  const ports = useGameStore(s => s.ports);
+  const ports = useGameStore(s => s.ports) ?? [];
   const currentPlayerIndex = useGameStore(s => s.currentPlayerIndex);
   const highlightedTileIds = useGameStore(s => s.highlightedTileIds);
   const highlightedVertexIds = useGameStore(s => s.highlightedVertexIds);

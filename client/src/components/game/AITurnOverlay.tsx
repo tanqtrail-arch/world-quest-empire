@@ -389,7 +389,7 @@ export default function AITurnOverlay() {
   const phase = useGameStore(s => s.phase);
   const isPlayingAI = useGameStore(s => s.isPlayingAI);
   const currentAIAction = useGameStore(s => s.currentAIAction);
-  const aiQueueLength = useGameStore(s => s.aiActionQueue.length);
+  const aiQueueLength = useGameStore(s => s.aiActionQueue?.length ?? 0);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const startedRef = useRef(false);
 
@@ -415,7 +415,7 @@ export default function AITurnOverlay() {
 
     timerRef.current = setTimeout(() => {
       const state = useGameStore.getState();
-      if (state.aiActionQueue.length > 0) {
+      if (state.aiActionQueue?.length > 0) {
         state.playNextAIAction();
       } else {
         // All done

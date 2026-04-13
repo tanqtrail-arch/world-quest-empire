@@ -122,7 +122,7 @@ export default function RankingScreen() {
         stored.forEach(id => computed.add(id));
         mergeBadges(name, computed);
       }
-      const ordered = BADGE_ORDER.filter(id => computed.has(id));
+      const ordered = BADGE_ORDER.filter((id: string) => computed.has(id));
       map.set(name, ordered);
     });
     return map;
@@ -131,7 +131,7 @@ export default function RankingScreen() {
   const maxStreakEver = useMemo(() => {
     let max = 0;
     let owner = '';
-    streaks.forEach((info, name) => {
+    streaks.forEach((info: any, name: string) => {
       if (info.max > max) { max = info.max; owner = name; }
     });
     return { max, owner };
@@ -175,7 +175,7 @@ export default function RankingScreen() {
         </motion.div>
 
         {/* Tab bar */}
-        {isSupabaseEnabled && (
+        {isSupabaseEnabled() && (
           <div className="flex gap-1 mb-3 bg-black/30 rounded-xl p-1">
             {([
               ['weekly', '📅', '今週'],
@@ -200,7 +200,7 @@ export default function RankingScreen() {
         )}
 
         {/* Max streak banner */}
-        {isSupabaseEnabled && maxStreakEver.max >= 3 && tab !== 'hall' && tab !== 'history' && (
+        {isSupabaseEnabled() && maxStreakEver.max >= 3 && tab !== 'hall' && tab !== 'history' && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -256,8 +256,8 @@ export default function RankingScreen() {
                     {activeList.map((entry, i) => {
                       const { title, emoji } = getTitle(entry.total_points);
                       const levelInfo = getLevel(entry.total_points);
-                      const st: StreakInfo = streaks.get(entry.player_name) ?? { current: 0, max: 0 };
-                      const fire = streakFire(st.current);
+                      const st: StreakInfo = streaks.get(entry.player_name) ?? { current: 0, best: 0, max: 0 };
+                      const fire = streakFire(st);
                       const playerBadges = badgesByPlayer.get(entry.player_name) ?? [];
                       const levelStyle = LEVEL_BORDER_STYLE[levelInfo.borderClass] ?? LEVEL_BORDER_STYLE['level-base'];
                       const baseBg = i === 0 ? 'linear-gradient(90deg, #FFD70030, transparent)' : i < 3 ? 'rgba(255,255,255,0.5)' : 'rgba(255,255,255,0.3)';
