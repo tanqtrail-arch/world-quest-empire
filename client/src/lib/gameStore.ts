@@ -11,7 +11,7 @@ import {
 import { EVENT_CARDS } from './eventCards';
 import { applyEventEffect, type EffectContext } from './eventCardEffects';
 import {
-  generateMap, generateVerticesAndEdges, createPlayer, rollDice,
+  generateMap, generateLargeMap, generate1d6Map, generateVerticesAndEdges, createPlayer, rollDice, rollSingleDice,
   distributeResourcesWithVertices, canAfford, payCost,
   canBuildSettlement, canBuildRoad, getValidSettlementVertices,
   getValidRoadEdges, getUpgradeableVertices, calculateLongestRoad,
@@ -80,8 +80,11 @@ interface GameStore {
   setScreen: (screen: GameStore['screen']) => void;
 
   // Stage mode
-  stageMode: { stageId: number; specialRules: StageSpecialRules } | null;
+  stageMode: { stageId: number; specialRules: StageSpecialRules; diceCount: 1 | 2 } | null;
   stageClearStars: number;
+  tradeCount: number; // track trades for stage clear conditions
+  tutorialMessage: string | null; // チュートリアル吹き出しメッセージ
+  dismissTutorialMessage: () => void;
 
   // Card picker mode (dice 2/12)
   cardPickerMode: { cards: EventCard[]; canRedraw: boolean } | null;
@@ -261,6 +264,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
   stageMode: null,
   stageClearStars: 0,
+  tradeCount: 0,
+  tutorialMessage: null,
   cardPickerMode: null,
 
   ports: [],
@@ -527,13 +532,19 @@ export const useGameStore = create<GameStore>((set, get) => ({
     if (state.phase !== 'rolling') return;
     clearDiceAnimationTimers();
 
-    const dice = rollDice();
-    const total = dice[0] + dice[1];
+    const isSingleDice = state.stageMode?.diceCount === 1;
+    const dice: [number, number] = isSingleDice
+      ? [rollSingleDice(), 0]
+      : rollDice();
+    const total = isSingleDice ? dice[0] : dice[0] + dice[1];
     const currentPlayer = state.players[state.currentPlayerIndex];
     const isHumanSeven = total === 7 && !currentPlayer.isAI;
 
+    const diceText = isSingleDice
+      ? `🎲 ${dice[0]}`
+      : `🎲 ${dice[0]} + ${dice[1]} = ${total}`;
     const logs: GameLogEntry[] = [
-      generateGameLog(`${currentPlayer.name}がサイコロを振った！ 🎲 ${dice[0]} + ${dice[1]} = ${total}`, 'info', currentPlayer.id),
+      generateGameLog(`${currentPlayer.name}がサイコロを振った！ ${diceText}`, 'info', currentPlayer.id),
     ];
 
     // Distribute resources
@@ -589,6 +600,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
       // Lucky 7: skip tile highlight/flag steps, go straight to resource summary
       diceAnimationTimers.push(setTimeout(() => {
         set({ diceAnimationStep: 4 as 0 | 1 | 2 | 3 | 4, showResourceGains: true });
+        if (get().stageMode) get().checkStageClear();
       }, 500));
     } else {
       // Step 2: Tile highlight (after 500ms)
@@ -604,6 +616,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
       // Step 4: Resource summary screen (after 1500ms)
       diceAnimationTimers.push(setTimeout(() => {
         set({ diceAnimationStep: 4 as 0 | 1 | 2 | 3 | 4, showResourceGains: true });
+        // Check stage clear after resources distributed (for resource_count condition)
+        if (get().stageMode) get().checkStageClear();
       }, 1500));
     }
   },
@@ -853,8 +867,10 @@ export const useGameStore = create<GameStore>((set, get) => ({
         gameLog: [...state.gameLog, ...logs],
       });
 
-      // Check win
-      if (updatedPlayer.victoryPoints >= WINNING_SCORE[state.difficulty]) {
+      // Check win (stage or normal)
+      if (state.stageMode) {
+        get().checkStageClear();
+      } else if (updatedPlayer.victoryPoints >= WINNING_SCORE[state.difficulty]) {
         set({ phase: 'finished', winner: updatedPlayer });
       }
 
@@ -906,6 +922,11 @@ export const useGameStore = create<GameStore>((set, get) => ({
         gameLog: [...state.gameLog, ...logs],
       });
 
+      // Check stage clear after road build
+      if (state.stageMode) {
+        get().checkStageClear();
+      }
+
     } else if (state.buildMode === 'city' && state.selectedVertexId) {
       if (!canAfford(player, BUILD_COSTS.city)) return;
 
@@ -934,7 +955,10 @@ export const useGameStore = create<GameStore>((set, get) => ({
         gameLog: [...state.gameLog, ...logs],
       });
 
-      if (updatedPlayer.victoryPoints >= WINNING_SCORE[state.difficulty]) {
+      // Check win (stage or normal)
+      if (state.stageMode) {
+        get().checkStageClear();
+      } else if (updatedPlayer.victoryPoints >= WINNING_SCORE[state.difficulty]) {
         set({ phase: 'finished', winner: updatedPlayer });
       }
     }
@@ -962,6 +986,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
     set({
       players: newPlayers,
+      tradeCount: state.tradeCount + 1,
       gameLog: [...state.gameLog, generateGameLog(
         `${player.name}が${give === 'rubber' ? 'ゴム' : give === 'oil' ? '石油' : give === 'gold' ? '金' : '食料'}3つを${receive === 'rubber' ? 'ゴム' : receive === 'oil' ? '石油' : receive === 'gold' ? '金' : '食料'}1つに交換！`,
         'trade', player.id
@@ -1816,6 +1841,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
     });
   },
 
+  dismissTutorialMessage: () => set({ tutorialMessage: null }),
+
   // =============================================
   // STAGE MODE
   // =============================================
@@ -1823,9 +1850,14 @@ export const useGameStore = create<GameStore>((set, get) => ({
     const stage = getStageById(stageId);
     if (!stage) return;
 
-    const tiles = generateMap();
-    const finalTiles = stage.mapSize === 'mini' ? tiles.slice(0, 3).map((t, i) => ({ ...t, id: i })) : tiles;
-    const { vertices, edges } = generateVerticesAndEdges(finalTiles);
+    // Generate map based on stage type
+    const isLarge = stage.mapSize === 'large';
+    const finalTiles = isLarge
+      ? generateLargeMap(stage.mapRows)
+      : stage.diceCount === 1
+        ? generate1d6Map()
+        : generateMap();
+    const { vertices, edges } = generateVerticesAndEdges(finalTiles, isLarge ? stage.mapRows : undefined);
 
     const humanPlayer = createPlayer('プレイヤー', 0, false, true);
     const aiPlayers = stage.aiSlots.map((slot) =>
@@ -1846,8 +1878,28 @@ export const useGameStore = create<GameStore>((set, get) => ({
       }
     }
 
-    const maxTurns = stage.specialRules.turnLimit
-      ?? (stage.difficulty === 'easy' ? 15 : stage.difficulty === 'normal' ? 20 : 25);
+    // Pre-place settlements for tutorial stages
+    const settlements: Settlement[] = [];
+    const roads: Road[] = [];
+    if (stage.preplacedSettlements && stage.preplacedSettlements > 0) {
+      // Pick valid vertices for the human player (prefer vertices touching multiple resource tiles)
+      const validVerts = vertices
+        .filter(v => v.adjacentTileIds.some(tid => {
+          const tile = finalTiles.find(t => t.id === tid);
+          return tile && tile.type !== 'sea' && tile.type !== 'desert';
+        }))
+        .sort((a, b) => b.adjacentTileIds.length - a.adjacentTileIds.length);
+
+      for (let i = 0; i < stage.preplacedSettlements && i < validVerts.length; i++) {
+        settlements.push({
+          vertexId: validVerts[i].id,
+          playerId: humanPlayer.id,
+          level: 'settlement' as const,
+        });
+        // Give +1 VP for each settlement
+        humanPlayer.victoryPoints += 1;
+      }
+    }
 
     const logs: GameLogEntry[] = [
       generateGameLog(`🗺️ ステージ${stage.id}: ${stage.title}`, 'system'),
@@ -1856,18 +1908,19 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
     set({
       screen: 'game',
-      stageMode: { stageId, specialRules: stage.specialRules },
+      stageMode: { stageId, specialRules: stage.specialRules, diceCount: stage.diceCount },
       stageClearStars: 0,
+      tradeCount: 0,
       cardPickerMode: null,
       players,
       tiles: finalTiles,
       vertices,
       edges,
-      settlements: [],
-      roads: [],
+      settlements,
+      roads,
       currentPlayerIndex: 0,
       currentTurn: 1,
-      maxTurns,
+      maxTurns: stage.maxTurns,
       phase: stage.specialRules.skipSetupPhase ? 'rolling' : 'setup',
       diceResult: null,
       difficulty: stage.difficulty,
@@ -1899,6 +1952,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
       aiActionQueue: [],
       currentAIAction: null,
       handoffPlayerIndex: null,
+      mapRows: isLarge ? stage.mapRows : undefined,
+      tutorialMessage: stage.tutorialMessage ?? null,
     });
   },
 
@@ -1925,38 +1980,47 @@ export const useGameStore = create<GameStore>((set, get) => ({
             cleared = true;
           }
         }
+        // Also check minTrades if specified
+        if (cleared && c.minTrades && state.tradeCount < c.minTrades) {
+          cleared = false;
+        }
         break;
       }
-      case 'settlements': {
+      case 'resource_count': {
+        const total = Object.values(human.resources).reduce((sum, v) => sum + v, 0);
+        cleared = total >= c.value;
+        break;
+      }
+      case 'road_count': {
+        const count = state.roads.filter(r => r.playerId === human.id).length;
+        cleared = count >= c.value;
+        break;
+      }
+      case 'settlement_count': {
         const count = state.settlements.filter(s => s.playerId === human.id).length;
         cleared = count >= c.value;
         break;
       }
-      case 'ports': {
-        // Ports not in simplified map — use settlement count as fallback
-        const settlementCount = state.settlements.filter(s => s.playerId === human.id).length;
-        cleared = settlementCount >= c.value;
-        break;
-      }
-      case 'survive_turns': {
-        cleared = state.currentTurn >= c.value && human.victoryPoints >= (c.minVP ?? 0);
-        break;
-      }
-      case 'coop_vp': {
-        const allMeetMin = state.players.every(p => p.victoryPoints >= (c.minVPEach ?? 0));
-        const totalVP = state.players.reduce((s, p) => s + p.victoryPoints, 0);
-        cleared = allMeetMin && totalVP >= c.value;
+      case 'city_count': {
+        const cityCount = state.settlements.filter(s => s.playerId === human.id && s.level === 'city').length;
+        cleared = cityCount >= c.value;
+        if (cleared && c.minVP && human.victoryPoints < c.minVP) {
+          cleared = false;
+        }
         break;
       }
     }
 
     if (cleared) {
+      // Star calculation: percentage of maxTurns
+      const star2Limit = Math.floor(stage.maxTurns * stage.starConditions.star2Pct);
+      const star3Limit = Math.floor(stage.maxTurns * stage.starConditions.star3Pct);
+
       let stars = 1;
-      if (state.currentTurn <= stage.starConditions.star2TurnLimit) {
+      if (state.currentTurn <= star2Limit) {
         stars = 2;
       }
-      // star3 requires quiz perfect — but quiz system may not be active in simplified mode
-      if (state.currentTurn <= stage.starConditions.star3TurnLimit) {
+      if (state.currentTurn <= star3Limit) {
         stars = 3;
       }
 

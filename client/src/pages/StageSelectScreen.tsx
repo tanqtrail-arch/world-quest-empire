@@ -49,6 +49,25 @@ function DiffBadge({ difficulty }: { difficulty: string }) {
   );
 }
 
+// Dice count badge
+function DiceBadge({ count }: { count: 1 | 2 }) {
+  return (
+    <span className="text-xs px-2 py-0.5 rounded-full font-bold bg-blue-600/80 text-blue-100">
+      {count === 1 ? '🎲×1' : '🎲×2'}
+    </span>
+  );
+}
+
+// Section header for stage groups
+function SectionHeader({ title, subtitle }: { title: string; subtitle: string }) {
+  return (
+    <div className="pt-3 pb-1 px-1">
+      <div className="text-white/90 font-black text-sm">{title}</div>
+      <div className="text-white/50 text-xs">{subtitle}</div>
+    </div>
+  );
+}
+
 // --- Stage Node on the map route ---
 function StageNode({
   stage,
@@ -99,8 +118,9 @@ function StageNode({
         <div className="font-bold text-white text-sm leading-tight truncate drop-shadow">
           {stage.title}
         </div>
-        <div className="text-white/70 text-xs truncate">
-          {stage.subtitle} ・ {stage.era}
+        <div className="text-white/70 text-xs truncate flex items-center gap-1.5">
+          {stage.subtitle}
+          <DiceBadge count={stage.diceCount} />
         </div>
       </div>
 
@@ -168,9 +188,14 @@ function StageDetailModal({
             </div>
             <div className="flex-1 min-w-0">
               <h2 className="text-white font-black text-lg leading-tight">{stage.title}</h2>
-              <div className="flex items-center gap-2 mt-0.5">
-                <span className="text-white/60 text-sm">{stage.era}</span>
+              <div className="flex items-center gap-2 mt-0.5 flex-wrap">
                 <DiffBadge difficulty={stage.difficulty} />
+                <DiceBadge count={stage.diceCount} />
+                {stage.aiSlots.length > 0 && (
+                  <span className="text-xs px-2 py-0.5 rounded-full font-bold bg-purple-600/80 text-purple-100">
+                    AI×{stage.aiSlots.length}
+                  </span>
+                )}
               </div>
             </div>
           </div>
@@ -195,6 +220,9 @@ function StageDetailModal({
             <div className="text-white text-sm">
               {describeClearCondition(stage)}
             </div>
+            <div className="text-white/50 text-xs">
+              制限: {stage.maxTurns}ターン以内
+            </div>
           </div>
 
           {/* Star conditions */}
@@ -202,29 +230,24 @@ function StageDetailModal({
             <div className="text-amber-400 font-bold text-xs">★獲得条件</div>
             <div className="text-white/70 text-xs space-y-0.5">
               <div>★ クリア条件を達成する</div>
-              <div>★★ {stage.starConditions.star2TurnLimit}ターン以内にクリア</div>
-              <div>★★★ クイズ全問正解 + {stage.starConditions.star3TurnLimit}ターン以内</div>
+              <div>★★ {Math.floor(stage.maxTurns * stage.starConditions.star2Pct)}ターン以内にクリア</div>
+              <div>★★★ {Math.floor(stage.maxTurns * stage.starConditions.star3Pct)}ターン以内にクリア</div>
             </div>
           </div>
 
-          {/* Special rules */}
-          {describeSpecialRules(stage).length > 0 && (
-            <div className="bg-red-500/10 rounded-xl p-3 space-y-1">
-              <div className="text-red-400 font-bold text-xs">特殊ルール</div>
-              {describeSpecialRules(stage).map((rule, i) => (
-                <div key={i} className="text-white/70 text-xs">⚠️ {rule}</div>
-              ))}
-            </div>
-          )}
-
-          {/* AI info */}
+          {/* Rule overview */}
           <div className="bg-white/5 rounded-xl p-3">
-            <div className="text-blue-400 font-bold text-xs mb-1">対戦相手</div>
-            <div className="text-white/70 text-xs">
-              {stage.aiSlots.length === 0
-                ? 'なし（チュートリアル）'
+            <div className="text-blue-400 font-bold text-xs mb-1">ルール概要</div>
+            <div className="text-white/70 text-xs space-y-0.5">
+              <div>サイコロ: {stage.diceCount === 1 ? '1つ (1-6)' : '2つ (2-12)'}</div>
+              <div>マップ: {stage.mapSize === 'large' ? '大きい (24タイル)' : '通常 (19タイル)'}</div>
+              <div>対戦相手: {stage.aiSlots.length === 0
+                ? 'なし（ソロプレイ）'
                 : `AI ${stage.aiSlots.length}体 (${stage.aiSlots.map(a => a.difficulty === 'easy' ? 'よわい' : a.difficulty === 'normal' ? 'ふつう' : 'つよい').join(', ')})`
-              }
+              }</div>
+              {describeSpecialRules(stage).map((rule, i) => (
+                <div key={i}>⚠️ {rule}</div>
+              ))}
             </div>
           </div>
         </div>
@@ -254,18 +277,24 @@ function StageDetailModal({
 function describeClearCondition(stage: StageDefinition): string {
   const c = stage.clearCondition;
   switch (c.type) {
-    case 'vp':
-      return c.beforeAI
+    case 'vp': {
+      let text = c.beforeAI
         ? `AIより先に勝利点${c.value}に到達`
         : `勝利点${c.value}に到達`;
-    case 'settlements':
-      return `拠点を${c.value}つ建設`;
-    case 'ports':
-      return `港を${c.value}つ確保`;
-    case 'survive_turns':
-      return `${c.value}ターン生き残り、勝利点${c.minVP}以上を維持`;
-    case 'coop_vp':
-      return `全プレイヤーがそれぞれ勝利点${c.minVPEach}以上`;
+      if (c.minTrades) text += `（交換${c.minTrades}回以上使用）`;
+      return text;
+    }
+    case 'resource_count':
+      return `資源を合計${c.value}つ集める`;
+    case 'road_count':
+      return `道を${c.value}本建設する`;
+    case 'settlement_count':
+      return `拠点を${c.value}つ建設する`;
+    case 'city_count': {
+      let text = `都市を${c.value}つ建設する`;
+      if (c.minVP) text += `（勝利点${c.minVP}以上）`;
+      return text;
+    }
     default:
       return 'クリア条件を達成';
   }
@@ -275,13 +304,19 @@ function describeSpecialRules(stage: StageDefinition): string[] {
   const rules: string[] = [];
   const sr = stage.specialRules;
   if (sr.resourceHalved) rules.push('全員の初期資源が半分');
-  if (sr.eventRateMultiplier && sr.eventRateMultiplier > 1) rules.push(`イベント発生率 ${sr.eventRateMultiplier}倍`);
-  if (sr.outerBaseDecayInterval) rules.push(`${sr.outerBaseDecayInterval}ターンごとに最外拠点が消滅`);
-  if (sr.coopMode) rules.push('協力モード: 全員が仲間！');
-  if (sr.turnLimit) rules.push(`${sr.turnLimit}ターン制限`);
-  if (sr.noTrade) rules.push('交易禁止');
+  if (sr.noTrade) rules.push('交換なし');
+  if (sr.enableEvents) rules.push('イベントカードあり');
+  if (sr.enableQuiz) rules.push('クイズあり');
+  if (sr.enablePorts) rules.push('港あり');
   return rules;
 }
+
+// Stage group boundaries
+const SECTION_BREAKS: Record<number, { title: string; subtitle: string }> = {
+  1: { title: '🎓 チュートリアル', subtitle: 'サイコロ1つ・ソロプレイ' },
+  4: { title: '⚔️ AI対戦', subtitle: 'サイコロ2つ・ライバル登場' },
+  7: { title: '🌍 フルルール', subtitle: '複数AI・全機能解放' },
+};
 
 // =============================================
 // MAIN COMPONENT
@@ -361,10 +396,12 @@ export default function StageSelectScreen() {
           const unlocked = isStageUnlocked(stage.id, progress);
           const isNext = stage.id === nextStageId;
           const prevCleared = i > 0 && !!progress[STAGES[i - 1].id]?.cleared;
+          const section = SECTION_BREAKS[stage.id];
 
           return (
             <div key={stage.id}>
-              {i > 0 && <Connector cleared={prevCleared} />}
+              {section && <SectionHeader title={section.title} subtitle={section.subtitle} />}
+              {i > 0 && !section && <Connector cleared={prevCleared} />}
               <StageNode
                 stage={stage}
                 progress={progress}

@@ -101,7 +101,7 @@ function OpponentBar() {
   }, [showResourceGains, resourceGains]);
 
   return (
-    <div className="flex gap-1.5 px-2 py-1.5 overflow-x-auto">
+    <div className="flex gap-1.5 px-2 py-1.5 overflow-x-auto md:flex-col md:overflow-x-visible md:overflow-y-auto md:px-0 md:py-0">
       {opponents.map(opp => {
         const isActive = isPlayingAI && currentAIAction?.playerId === opp.id;
         const playerPopups = popups.filter(p => p.playerId === opp.id);

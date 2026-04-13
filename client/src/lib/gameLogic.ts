@@ -3,7 +3,7 @@ import {
   type GameTile, type Player, type Resources, type ResourceType, type TileType,
   type EventCard, type GameLogEntry, type Difficulty,
   type Vertex, type Edge, type Settlement, type Road,
-  HEX_LAYOUT, TILE_DISTRIBUTION, DICE_NUMBERS, EVENT_CARDS,
+  HEX_LAYOUT, TILE_DISTRIBUTION, TILE_DISTRIBUTION_LARGE, DICE_NUMBERS, EVENT_CARDS,
   BUILD_COSTS, VP_VALUES, WINNING_SCORE, PLAYER_COLORS,
 } from './gameTypes';
 import {
@@ -32,14 +32,14 @@ export function genId(): string {
 // =============================================
 
 // Generate all vertices and edges from the hex grid
-export function generateVerticesAndEdges(tiles: GameTile[]): { vertices: Vertex[]; edges: Edge[] } {
+export function generateVerticesAndEdges(tiles: GameTile[], mapRows?: number[]): { vertices: Vertex[]; edges: Edge[] } {
   // Map from coordinate key to vertex data
   const vertexMap = new Map<string, { x: number; y: number; tileIds: Set<number> }>();
   // Map from tile index to its corner coordinate keys
   const tileCornerKeys: string[][] = [];
 
   tiles.forEach((tile, tileIdx) => {
-    const center = getTileCenter(tileIdx);
+    const center = getTileCenter(tileIdx, mapRows);
     const corners = getHexCorners(center.x, center.y);
     const keys: string[] = [];
 
@@ -139,27 +139,51 @@ export function generateVerticesAndEdges(tiles: GameTile[]): { vertices: Vertex[
 // =============================================
 
 export function generateMap(): GameTile[] {
-  const shuffledTypes = shuffle(TILE_DISTRIBUTION);
-  const nonSpecialIndices: number[] = [];
-  shuffledTypes.forEach((t, i) => { if (t !== 'sea' && t !== 'desert') nonSpecialIndices.push(i); });
-  
+  // Desert fixed at center (index 9 in 3-4-5-4-3 layout)
+  const DESERT_INDEX = 9;
+  const resourceTypes = shuffle(
+    TILE_DISTRIBUTION.filter(t => t !== 'desert')
+  );
   const shuffledNumbers = shuffle(DICE_NUMBERS);
   let numIdx = 0;
+  let resIdx = 0;
 
   return HEX_LAYOUT.map((pos, i) => {
-    const type = shuffledTypes[i] || 'sea';
-    let diceNumber = 0;
-    if (type !== 'sea' && type !== 'desert' && numIdx < shuffledNumbers.length) {
-      diceNumber = shuffledNumbers[numIdx++];
+    if (i === DESERT_INDEX) {
+      return { id: i, type: 'desert' as TileType, diceNumber: 0, q: pos.q, r: pos.r };
     }
-    return {
-      id: i,
-      type,
-      diceNumber,
-      q: pos.q,
-      r: pos.r,
-    };
+    const type = resourceTypes[resIdx++] || 'rubber';
+    const diceNumber = numIdx < shuffledNumbers.length ? shuffledNumbers[numIdx++] : 0;
+    return { id: i, type, diceNumber, q: pos.q, r: pos.r };
   });
+}
+
+// Generate large map (24 tiles, 3-4-5-6-5-4-3 layout, desert at center index 14)
+export function generateLargeMap(mapRows: number[]): GameTile[] {
+  const tileCount = mapRows.reduce((a, b) => a + b, 0);
+  const DESERT_INDEX = Math.floor(tileCount / 2);
+  const resourceTypes = shuffle(
+    TILE_DISTRIBUTION_LARGE.filter(t => t !== 'desert')
+  );
+  // More dice numbers for larger map
+  const largeNumbers = shuffle([
+    2, 3, 3, 4, 4, 5, 5, 6, 6, 8, 8, 9, 9, 10, 10, 11, 11, 12,
+    3, 4, 5, 6, 9, 10, 11,
+  ]);
+  let numIdx = 0;
+  let resIdx = 0;
+
+  const tiles: GameTile[] = [];
+  for (let i = 0; i < tileCount; i++) {
+    if (i === DESERT_INDEX) {
+      tiles.push({ id: i, type: 'desert', diceNumber: 0, q: 0, r: i });
+    } else {
+      const type = resourceTypes[resIdx++] || 'rubber';
+      const diceNumber = numIdx < largeNumbers.length ? largeNumbers[numIdx++] : 0;
+      tiles.push({ id: i, type, diceNumber, q: 0, r: i });
+    }
+  }
+  return tiles;
 }
 
 // =============================================
@@ -193,6 +217,36 @@ export function rollDice(): [number, number] {
     Math.floor(Math.random() * 6) + 1,
     Math.floor(Math.random() * 6) + 1,
   ];
+}
+
+export function rollSingleDice(): number {
+  return Math.floor(Math.random() * 6) + 1;
+}
+
+// =============================================
+// 1d6 MAP GENERATION (stages 1-3: normal 19-tile map with dice 1-6)
+// =============================================
+// Uses the standard 3-4-5-4-3 layout (19 tiles) with diceNumber 1-6 randomly distributed.
+// Each number 1-6 appears 3 times across the 18 resource tiles.
+
+export function generate1d6Map(): GameTile[] {
+  const DESERT_INDEX = 9; // center of 3-4-5-4-3 layout
+  const resourceTypes = shuffle(
+    TILE_DISTRIBUTION.filter(t => t !== 'desert')
+  );
+  // 18 resource tiles, dice numbers 1-6 each appearing 3 times
+  const diceNums1d6 = shuffle([1, 1, 1, 2, 2, 2, 3, 3, 3, 4, 4, 4, 5, 5, 5, 6, 6, 6]);
+  let numIdx = 0;
+  let resIdx = 0;
+
+  return HEX_LAYOUT.map((pos, i) => {
+    if (i === DESERT_INDEX) {
+      return { id: i, type: 'desert' as TileType, diceNumber: 0, q: pos.q, r: pos.r };
+    }
+    const type = resourceTypes[resIdx++] || 'rubber';
+    const diceNumber = numIdx < diceNums1d6.length ? diceNums1d6[numIdx++] : 0;
+    return { id: i, type, diceNumber, q: pos.q, r: pos.r };
+  });
 }
 
 // =============================================
@@ -261,41 +315,28 @@ export function payCost(player: Player, cost: Partial<Resources>): void {
 }
 
 // Check if a vertex is valid for building a settlement
+// Simple version: no distance rule, no adjacent-enemy check, no BFS
 export function canBuildSettlement(
   vertexId: string,
   playerId: string,
   vertices: Vertex[],
   settlements: Settlement[],
   roads: Road[],
-  isSetupPhase: boolean
+  isSetupPhase: boolean,
+  difficulty: Difficulty = 'normal',
 ): boolean {
   const vertex = vertices.find(v => v.id === vertexId);
   if (!vertex) return false;
 
-  // Check no settlement already exists on this vertex
+  // No duplicate settlement on same vertex
   if (settlements.some(s => s.vertexId === vertexId)) return false;
 
-  // Distance rule: no settlement on adjacent vertices
-  const hasAdjacentSettlement = vertex.adjacentVertexIds.some(adjVId =>
-    settlements.some(s => s.vertexId === adjVId)
-  );
-  if (hasAdjacentSettlement) return false;
-
-  // Only allow on vertices adjacent to at least one non-sea tile
-  const hasLandTile = vertex.adjacentTileIds.some(tileId => {
-    // tileId is the tile.id which equals the index
-    return true; // We already filtered sea-only vertices in generation
-  });
-
-  // During setup phase, can place anywhere (no road requirement)
+  // Setup phase: place anywhere
   if (isSetupPhase) return true;
 
-  // During normal play, must have a road connected to this vertex
+  // Normal play: must have own road connected
   const playerRoadEdgeIds = roads.filter(r => r.playerId === playerId).map(r => r.edgeId);
-  const vertexEdges = vertex.adjacentEdgeIds;
-  const hasRoad = vertexEdges.some(eId => playerRoadEdgeIds.includes(eId));
-
-  return hasRoad;
+  return vertex.adjacentEdgeIds.some(eId => playerRoadEdgeIds.includes(eId));
 }
 
 // Check if an edge is valid for building a road

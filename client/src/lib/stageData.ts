@@ -1,5 +1,9 @@
 // ===== Stage Mode Data =====
-// 10ステージの定義。各ステージはストーリー + 特殊ルール + クリア条件を持つ。
+// 10ステージの段階的学習設計（チュートリアル形式）
+// ステージ1-3: 1d6, ソロ, 基本操作を学ぶ
+// ステージ4-6: 2d6, AI1体
+// ステージ7-9: 2d6, 複数AI, フルルール
+// ステージ10: 最終試練（大マップ）
 
 import type { Difficulty } from './gameTypes';
 
@@ -7,41 +11,40 @@ import type { Difficulty } from './gameTypes';
 export interface StageSpecialRules {
   resourceHalved?: boolean;       // 全員資源半減スタート
   eventRateMultiplier?: number;   // イベント発生率倍率
-  outerBaseDecayInterval?: number; // N ターンごとに最外拠点消滅
-  coopMode?: boolean;             // 協力モード（全員でVP合計）
-  coopTargetTotal?: number;       // 協力モード目標合計VP
-  skipSetupPhase?: boolean;       // セットアップフェイズスキップ（チュートリアル用）
+  skipSetupPhase?: boolean;       // セットアップフェイズスキップ（初期配置済み）
   noTrade?: boolean;              // 交易禁止
-  turnLimit?: number;             // ターン制限（maxTurnsとは別にクリア判定用）
+  enablePorts?: boolean;          // 港を有効化
+  enableEvents?: boolean;         // イベントカード有効化
+  enableQuiz?: boolean;           // クイズ有効化
 }
 
 // --- Clear Condition ---
 export interface StageClearCondition {
-  type: 'vp' | 'settlements' | 'ports' | 'survive_turns' | 'coop_vp';
-  /** VP到達 or 拠点数 or 港数 or 生存ターン数 */
+  type: 'vp' | 'resource_count' | 'road_count' | 'settlement_count' | 'city_count';
+  /** 目標値 */
   value: number;
-  /** survive_turns の場合、追加でVP条件 */
+  /** VP条件も同時に満たす必要がある場合 */
   minVP?: number;
-  /** coopの場合、各プレイヤー最低VP */
-  minVPEach?: number;
+  /** 交換回数条件 */
+  minTrades?: number;
   /** AIより先に到達する必要があるか */
   beforeAI?: boolean;
 }
 
-// --- Star Conditions ---
+// --- Star Conditions (percentage-based) ---
 export interface StageStarConditions {
-  /** ★1: クリア条件達成（常にclear） */
+  /** ★1: クリア */
   star1: 'clear';
-  /** ★2: 規定ターン内クリア */
-  star2TurnLimit: number;
-  /** ★3: クイズ全問正解 + 規定ターン内 */
-  star3TurnLimit: number;
+  /** ★2: 規定ターン数の80%以内 */
+  star2Pct: number; // 0.8
+  /** ★3: 規定ターン数の50%以内 */
+  star3Pct: number; // 0.5
 }
 
 // --- AI Slot Definition ---
 export interface StageAISlot {
   difficulty: Difficulty;
-  countryIndex: number; // PLAYER_COLORSのインデックス
+  countryIndex: number;
 }
 
 // --- Stage Definition ---
@@ -49,15 +52,22 @@ export interface StageDefinition {
   id: number;
   title: string;
   subtitle: string;
-  era: string;
+  description: string;   // ルール概要（StageSelectに表示）
   storyText: string;
   clearText: string;
-  mapSize: 'mini' | 'standard' | 'large';
+  mapSize: 'normal' | 'large';
+  mapRows: number[];      // タイル行構成
+  diceCount: 1 | 2;
+  maxTurns: number;
   aiSlots: StageAISlot[];
   specialRules: StageSpecialRules;
   clearCondition: StageClearCondition;
   starConditions: StageStarConditions;
   difficulty: Difficulty;
+  /** 初期拠点を自動配置する数 (skipSetupPhase時) */
+  preplacedSettlements?: number;
+  /** チュートリアル吹き出しメッセージ */
+  tutorialMessage?: string;
 }
 
 // --- Stage Progress (localStorage) ---
@@ -111,191 +121,229 @@ export function isStageUnlocked(stageId: number, progress: StageProgressMap): bo
 }
 
 // =============================================
-// 10 STAGES
+// 10 STAGES - 段階的学習設計（全ステージ通常19タイルマップ、ステージ10のみ大マップ）
 // =============================================
 
+const NORMAL_ROWS = [3, 4, 5, 4, 3]; // 19タイル
+const LARGE_ROWS = [3, 4, 5, 6, 5, 4, 3]; // 24タイル
+
 export const STAGES: StageDefinition[] = [
+  // ===== ステージ1-3: サイコロ1つ、AIなし、基本操作を学ぶ =====
   {
     id: 1,
-    title: '産業革命の始まり',
-    subtitle: 'チュートリアル',
-    era: '1760年代',
+    title: 'サイコロと資源',
+    subtitle: 'サイコロの基本を覚えよう',
+    description: 'サイコロ1つ。出た目のタイルから資源がもらえる！',
     storyText:
-      'イギリスで蒸気機関が発明された。工場が次々と建ち、世界が変わり始める。まずは拠点を2つ建てて、資源を集める練習をしよう！',
+      '冒険のはじまりだ！サイコロを振って、出た目と同じ数字のタイルから資源を集めよう。まずは資源をたくさん集めることが目標だ！',
     clearText:
-      '素晴らしい！拠点の建て方をマスターした。次は他の国と競争だ！',
-    mapSize: 'mini',
+      'すごい！サイコロと資源の仕組みをマスターした。次は道の作り方を覚えよう！',
+    mapSize: 'normal',
+    mapRows: NORMAL_ROWS,
+    diceCount: 1,
+    maxTurns: 10,
     aiSlots: [],
-    specialRules: { skipSetupPhase: true },
-    clearCondition: { type: 'settlements', value: 2 },
-    starConditions: { star1: 'clear', star2TurnLimit: 8, star3TurnLimit: 5 },
+    specialRules: { skipSetupPhase: true, noTrade: true },
+    clearCondition: { type: 'resource_count', value: 8 },
+    starConditions: { star1: 'clear', star2Pct: 0.8, star3Pct: 0.5 },
     difficulty: 'easy',
+    preplacedSettlements: 1,
+    tutorialMessage: 'サイコロを振ると、出た目と同じ番号のタイルから資源がもらえるよ！',
   },
   {
     id: 2,
-    title: '植民地競争',
-    subtitle: '最初のライバル',
-    era: '1800年代',
+    title: '道を作ろう',
+    subtitle: '建設の基本',
+    description: '資源を使って道を建設しよう！',
     storyText:
-      'ヨーロッパの国々がアジアやアフリカに進出し始めた。ライバル国より先に勝利点5を目指せ！制限時間は5ターンだ。',
+      '資源の使い方を覚えよう。ゴムと石油を集めて道を3本建設するのが目標だ。サイコロを振って資源を集めて、道を建てよう！',
     clearText:
-      '植民地競争に勝利した！しかし、アフリカでは新たな争いが始まっている…',
-    mapSize: 'standard',
-    aiSlots: [{ difficulty: 'easy', countryIndex: 1 }],
-    specialRules: { turnLimit: 5 },
-    clearCondition: { type: 'vp', value: 5, beforeAI: true },
-    starConditions: { star1: 'clear', star2TurnLimit: 4, star3TurnLimit: 3 },
+      '道を建てられるようになった！次は拠点を増やすことに挑戦だ！',
+    mapSize: 'normal',
+    mapRows: NORMAL_ROWS,
+    diceCount: 1,
+    maxTurns: 12,
+    aiSlots: [],
+    specialRules: { skipSetupPhase: true, noTrade: true },
+    clearCondition: { type: 'road_count', value: 3 },
+    starConditions: { star1: 'clear', star2Pct: 0.8, star3Pct: 0.5 },
     difficulty: 'easy',
+    preplacedSettlements: 1,
+    tutorialMessage: 'ゴム1+石油1で道が作れるよ！道を伸ばして領土を広げよう',
   },
   {
     id: 3,
-    title: 'アフリカ分割',
-    subtitle: '港を確保せよ',
-    era: '1880年代',
+    title: '拠点を増やせ',
+    subtitle: '道→拠点の建設チェーン',
+    description: '道を伸ばして、新しい拠点を建設！',
     storyText:
-      'ヨーロッパ列強がアフリカを分割している。砂漠が多い厳しい土地で、港を2つ確保して貿易路を築け！',
+      '道をつないだ先に新しい拠点を建てられるぞ！拠点を合計3つにするのが目標だ。全資源を1つずつ集めて拠点を建てよう！',
     clearText:
-      'アフリカの港を確保した。だが、列強の間で同盟と対立が生まれている…',
-    mapSize: 'standard',
-    aiSlots: [{ difficulty: 'normal', countryIndex: 2 }],
-    specialRules: {},
-    clearCondition: { type: 'ports', value: 2 },
-    starConditions: { star1: 'clear', star2TurnLimit: 12, star3TurnLimit: 8 },
-    difficulty: 'normal',
+      '拠点の建て方をマスターした！いよいよライバルとの戦いが始まる…',
+    mapSize: 'normal',
+    mapRows: NORMAL_ROWS,
+    diceCount: 1,
+    maxTurns: 15,
+    aiSlots: [],
+    specialRules: { skipSetupPhase: true, noTrade: true },
+    clearCondition: { type: 'settlement_count', value: 3 },
+    starConditions: { star1: 'clear', star2Pct: 0.8, star3Pct: 0.5 },
+    difficulty: 'easy',
+    preplacedSettlements: 1,
+    tutorialMessage: '道の先の頂点に新しい拠点を建てられるよ！全資源1つずつ必要',
   },
+
+  // ===== ステージ4-6: サイコロ2つ、AI登場 =====
   {
     id: 4,
-    title: '同盟と対立',
-    subtitle: '2国を相手に',
-    era: '1900年代',
+    title: 'はじめてのライバル',
+    subtitle: '2d6とAI対戦の基本',
+    description: 'サイコロ2つ！AIとの初対戦。',
     storyText:
-      '世界は2つの陣営に分かれつつある。弱い国と強い国、2つのライバルを相手に勝利点7を目指せ！',
+      'ここからサイコロが2つになる！2つの合計が出目だ。ライバル国が登場。相手より先に勝利点5を目指せ！',
     clearText:
-      '複数の国を相手に勝利した！しかし、ヨーロッパに戦争の影が忍び寄る…',
-    mapSize: 'standard',
-    aiSlots: [
-      { difficulty: 'easy', countryIndex: 1 },
-      { difficulty: 'hard', countryIndex: 3 },
-    ],
+      'ライバルに勝利した！2つのサイコロにも慣れてきたかな？',
+    mapSize: 'normal',
+    mapRows: NORMAL_ROWS,
+    diceCount: 2,
+    maxTurns: 15,
+    aiSlots: [{ difficulty: 'easy', countryIndex: 1 }],
     specialRules: {},
-    clearCondition: { type: 'vp', value: 7 },
-    starConditions: { star1: 'clear', star2TurnLimit: 15, star3TurnLimit: 10 },
-    difficulty: 'normal',
+    clearCondition: { type: 'vp', value: 5 },
+    starConditions: { star1: 'clear', star2Pct: 0.8, star3Pct: 0.5 },
+    difficulty: 'easy',
+    tutorialMessage: 'サイコロが2つに！合計の数字でタイルが光るよ。6と8が出やすい！',
   },
   {
     id: 5,
-    title: '第一次世界大戦',
-    subtitle: '混乱を生き延びろ',
-    era: '1914年',
+    title: '交換と港',
+    subtitle: '交換と港の活用',
+    description: '資源交換と港を使いこなせ！',
     storyText:
-      '世界大戦が勃発した！イベントが2倍の頻度で起きる混乱の中、20ターン生き残り、勝利点6以上を維持せよ！',
+      '資源が足りない？交換を使おう！港を使えばもっとお得に交換できるぞ。交換を3回以上使って、勝利点6を目指せ！',
     clearText:
-      '大戦を生き延びた。しかし、戦争の傷跡は深く、世界経済に暗雲が…',
-    mapSize: 'standard',
-    aiSlots: [
-      { difficulty: 'normal', countryIndex: 2 },
-      { difficulty: 'normal', countryIndex: 4 },
-    ],
-    specialRules: { eventRateMultiplier: 2 },
-    clearCondition: { type: 'survive_turns', value: 20, minVP: 6 },
-    starConditions: { star1: 'clear', star2TurnLimit: 20, star3TurnLimit: 20 },
+      '交換をマスターした！これで資源不足も怖くない！',
+    mapSize: 'normal',
+    mapRows: NORMAL_ROWS,
+    diceCount: 2,
+    maxTurns: 18,
+    aiSlots: [{ difficulty: 'normal', countryIndex: 2 }],
+    specialRules: { enablePorts: true },
+    clearCondition: { type: 'vp', value: 6, minTrades: 3 },
+    starConditions: { star1: 'clear', star2Pct: 0.8, star3Pct: 0.5 },
     difficulty: 'normal',
+    tutorialMessage: '余った資源は交換できるよ！港の近くに拠点を建てると交換レートがお得！',
   },
   {
     id: 6,
-    title: '世界恐慌',
-    subtitle: '資源が足りない！',
-    era: '1929年',
+    title: '都市化',
+    subtitle: '都市化戦略',
+    description: '拠点を都市にアップグレード！',
     storyText:
-      '世界恐慌が発生！全プレイヤーの初期資源が半分からスタート。厳しい状況から勝利点8を目指せ！',
+      '拠点を都市にアップグレードすると、資源が2倍もらえるようになる！都市を1つ建設して、勝利点7を目指せ！',
     clearText:
-      '恐慌を乗り越えた！だが、世界では再び戦争の足音が…',
-    mapSize: 'standard',
-    aiSlots: [
-      { difficulty: 'normal', countryIndex: 1 },
-      { difficulty: 'normal', countryIndex: 3 },
-    ],
-    specialRules: { resourceHalved: true },
-    clearCondition: { type: 'vp', value: 8 },
-    starConditions: { star1: 'clear', star2TurnLimit: 18, star3TurnLimit: 12 },
-    difficulty: 'hard',
+      '都市化の力を知った！いよいよ世界の列強たちとの戦いだ…',
+    mapSize: 'normal',
+    mapRows: NORMAL_ROWS,
+    diceCount: 2,
+    maxTurns: 20,
+    aiSlots: [{ difficulty: 'normal', countryIndex: 3 }],
+    specialRules: { enablePorts: true },
+    clearCondition: { type: 'city_count', value: 1, minVP: 7 },
+    starConditions: { star1: 'clear', star2Pct: 0.8, star3Pct: 0.5 },
+    difficulty: 'normal',
+    tutorialMessage: '拠点を都市にアップグレード！資源が2倍もらえるようになるよ',
   },
+
+  // ===== ステージ7-10: フルルール =====
   {
     id: 7,
-    title: '第二次世界大戦',
-    subtitle: '3国に勝て',
-    era: '1939年',
+    title: '列強の時代',
+    subtitle: '複数の敵との戦略',
+    description: '2体のAIと戦え！',
     storyText:
-      '第二次世界大戦。3つの強国を相手に、勝利点10を目指して勝利せよ！',
+      '2つの国が立ちはだかる。限られた土地を奪い合い、勝利点8に先に到達した者が勝者だ！',
     clearText:
-      '大戦に勝利した！世界は新しい秩序を求めている…',
-    mapSize: 'standard',
+      '2国を相手に勝利した！しかし、世界にはまだ強敵が…',
+    mapSize: 'normal',
+    mapRows: NORMAL_ROWS,
+    diceCount: 2,
+    maxTurns: 22,
     aiSlots: [
-      { difficulty: 'hard', countryIndex: 1 },
-      { difficulty: 'hard', countryIndex: 3 },
-      { difficulty: 'hard', countryIndex: 4 },
+      { difficulty: 'normal', countryIndex: 1 },
+      { difficulty: 'normal', countryIndex: 4 },
     ],
-    specialRules: {},
-    clearCondition: { type: 'vp', value: 10 },
-    starConditions: { star1: 'clear', star2TurnLimit: 20, star3TurnLimit: 15 },
-    difficulty: 'hard',
+    specialRules: { enablePorts: true },
+    clearCondition: { type: 'vp', value: 8 },
+    starConditions: { star1: 'clear', star2Pct: 0.8, star3Pct: 0.5 },
+    difficulty: 'normal',
   },
   {
     id: 8,
-    title: '独立の波',
-    subtitle: '拠点が消える！',
-    era: '1950年代',
+    title: '帝国主義',
+    subtitle: 'イベント対応と危機管理',
+    description: 'イベントカード発動！危機を乗り越えろ。',
     storyText:
-      'アジア・アフリカで独立運動が広がる。3ターンごとに最も外側の拠点が消滅する！拠点を失いながらも勝利点12を目指せ！',
+      'イベントカードが登場！予想外の出来事に対応しながら、勝利点10を目指せ！',
     clearText:
-      '独立の嵐を乗り越えた！世界は協力の時代に向かう…',
-    mapSize: 'standard',
+      'イベントの嵐を乗り越えた！最終決戦が近い…',
+    mapSize: 'normal',
+    mapRows: NORMAL_ROWS,
+    diceCount: 2,
+    maxTurns: 25,
     aiSlots: [
       { difficulty: 'hard', countryIndex: 2 },
       { difficulty: 'hard', countryIndex: 5 },
     ],
-    specialRules: { outerBaseDecayInterval: 3 },
-    clearCondition: { type: 'vp', value: 12 },
-    starConditions: { star1: 'clear', star2TurnLimit: 22, star3TurnLimit: 16 },
+    specialRules: { enablePorts: true, enableEvents: true },
+    clearCondition: { type: 'vp', value: 10 },
+    starConditions: { star1: 'clear', star2Pct: 0.8, star3Pct: 0.5 },
     difficulty: 'hard',
   },
   {
     id: 9,
-    title: '国連設立',
-    subtitle: '協力モード',
-    era: '1945年',
+    title: '世界大戦',
+    subtitle: '全スキル総合',
+    description: '3体のAI、全機能！',
     storyText:
-      '国際連合が設立された。今回は全員が味方！全プレイヤーがそれぞれ勝利点8以上に到達すれば勝利だ！',
+      '3つの強国と激突！イベント・クイズ・交換、全てのスキルを駆使して勝利点12を目指せ！',
     clearText:
-      '全員で目標を達成した！協力の力で世界は平和へ向かう。あと1つ、最後の試練が待っている…',
-    mapSize: 'standard',
-    aiSlots: [
-      { difficulty: 'normal', countryIndex: 1 },
-      { difficulty: 'normal', countryIndex: 3 },
-    ],
-    specialRules: { coopMode: true, coopTargetTotal: 30 },
-    clearCondition: { type: 'coop_vp', value: 30, minVPEach: 8 },
-    starConditions: { star1: 'clear', star2TurnLimit: 25, star3TurnLimit: 18 },
-    difficulty: 'normal',
-  },
-  {
-    id: 10,
-    title: '最終試練',
-    subtitle: '完全勝利を目指せ',
-    era: '現代',
-    storyText:
-      '全ての時代を生き抜いてきた。最後の試練は、広大なマップで3つの強国に勝利すること。勝利点15で完全勝利だ！',
-    clearText:
-      'おめでとう！全ステージ制覇！あなたは真の世界の覇者だ！歴史に名を刻もう！',
-    mapSize: 'large',
+      '世界大戦を制した！残るは最後の試練のみ…',
+    mapSize: 'normal',
+    mapRows: NORMAL_ROWS,
+    diceCount: 2,
+    maxTurns: 28,
     aiSlots: [
       { difficulty: 'hard', countryIndex: 1 },
       { difficulty: 'hard', countryIndex: 3 },
       { difficulty: 'hard', countryIndex: 5 },
     ],
-    specialRules: {},
+    specialRules: { enablePorts: true, enableEvents: true, enableQuiz: true },
+    clearCondition: { type: 'vp', value: 12 },
+    starConditions: { star1: 'clear', star2Pct: 0.8, star3Pct: 0.5 },
+    difficulty: 'hard',
+  },
+  {
+    id: 10,
+    title: '最終試練：世界征服',
+    subtitle: '逆境からの勝利',
+    description: '大マップ！資源半減スタート！全機能フル稼働！',
+    storyText:
+      '全ての時代を生き抜いてきた。最後の試練は、資源が半分からのスタート。3つの強国を倒し、勝利点15で完全勝利を目指せ！',
+    clearText:
+      'おめでとう！全ステージ制覇！あなたは真の世界の覇者だ！',
+    mapSize: 'large',
+    mapRows: LARGE_ROWS,
+    diceCount: 2,
+    maxTurns: 30,
+    aiSlots: [
+      { difficulty: 'hard', countryIndex: 1 },
+      { difficulty: 'hard', countryIndex: 3 },
+      { difficulty: 'hard', countryIndex: 5 },
+    ],
+    specialRules: { resourceHalved: true, enablePorts: true, enableEvents: true, enableQuiz: true },
     clearCondition: { type: 'vp', value: 15 },
-    starConditions: { star1: 'clear', star2TurnLimit: 25, star3TurnLimit: 18 },
+    starConditions: { star1: 'clear', star2Pct: 0.8, star3Pct: 0.5 },
     difficulty: 'hard',
   },
 ];

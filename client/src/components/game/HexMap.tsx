@@ -10,7 +10,7 @@ import { useGameStore } from '@/lib/gameStore';
 import { TILE_INFO, RESOURCE_INFO, type ResourceType, type TileType, type GameTile, type EventCard, type Port } from '@/lib/gameTypes';
 import { getValidSettlementVertices, getValidRoadEdges } from '@/lib/gameLogic';
 import {
-  HEX_SIZE, SVG_WIDTH, SVG_HEIGHT,
+  HEX_SIZE,
   getTileCenter, getHexPoints, getSvgDimensions,
 } from '@/lib/hexGeometry';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -750,13 +750,13 @@ function HexMap() {
       {/* Scrollable Map Container */}
       <div
         ref={mapRef}
-        className="w-full overflow-auto"
-        style={{ maxHeight: '55vh', WebkitOverflowScrolling: 'touch' }}
+        className="w-full overflow-auto max-h-[55vh] md:max-h-full md:flex-1"
+        style={{ WebkitOverflowScrolling: 'touch' }}
       >
         <svg
-          viewBox={`0 0 ${SVG_WIDTH} ${SVG_HEIGHT}`}
+          viewBox={`0 0 ${svgW} ${svgH}`}
           width="100%"
-          style={{ minWidth: '360px', minHeight: '300px' }}
+          style={{ minWidth: mapRows ? '200px' : '360px', minHeight: mapRows ? '180px' : '300px' }}
           className="drop-shadow-lg"
         >
           <TilesLayer

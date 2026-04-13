@@ -229,14 +229,22 @@ export const HEX_LAYOUT: { q: number; r: number }[] = [
   { q: -2, r: 4 }, { q: -1, r: 4 }, { q: 0, r: 4 },
 ];
 
-// --- Tile Distribution ---
+// --- Tile Distribution (19 tiles, no sea) ---
 export const TILE_DISTRIBUTION: TileType[] = [
-  'rubber', 'rubber', 'rubber', 'rubber',
-  'oil', 'oil', 'oil',
-  'gold', 'gold', 'gold',
-  'food', 'food', 'food', 'food',
+  'rubber', 'rubber', 'rubber', 'rubber', 'rubber',
+  'oil', 'oil', 'oil', 'oil',
+  'gold', 'gold', 'gold', 'gold',
+  'food', 'food', 'food', 'food', 'food',
   'desert',
-  'sea', 'sea', 'sea', 'sea',
+];
+
+// --- Tile Distribution for large maps (24 tiles, no sea) ---
+export const TILE_DISTRIBUTION_LARGE: TileType[] = [
+  'rubber', 'rubber', 'rubber', 'rubber', 'rubber', 'rubber',
+  'oil', 'oil', 'oil', 'oil', 'oil',
+  'gold', 'gold', 'gold', 'gold', 'gold',
+  'food', 'food', 'food', 'food', 'food', 'food', 'food',
+  'desert',
 ];
 
 // --- Dice Numbers (excluding 7, distributed across non-sea/non-desert tiles) ---

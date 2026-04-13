@@ -1,10 +1,9 @@
 /*
  * GameScreen - メインゲーム画面
  * Design: ポップ冒険RPGスタイル
- * Layout: 100dvh flex column with proper spacing
- * - 上部: 対戦相手情報バー
- * - 中央: ヘックスマップ + サイコロ
- * - 下部: ゲームログ + プレイヤー情報 + アクションメニュー
+ * Layout:
+ *   スマホ (< md): 縦1カラム (100dvh flex column)
+ *   PC/タブレット (>= md): 左=マップ全面 + 右=固定サイドバー(w-80/lg:w-96)
  * - オーバーレイ: AIターン演出 + イベントポップアップ + ハンドオフ画面
  */
 import HexMap from '@/components/game/HexMap';
@@ -61,6 +60,32 @@ function TileHelpTooltip({ onClose }: { onClose: () => void }) {
           <span className="inline-block bg-orange-500 text-white text-[10px] px-2 py-0.5 rounded-full">🌾食料</span>
         </div>
       </div>
+    </motion.div>
+  );
+}
+
+// Tutorial hint bubble - shows tutorialMessage from store for all stages
+function TutorialBubble() {
+  const tutorialMessage = useGameStore(s => s.tutorialMessage);
+  const dismissTutorialMessage = useGameStore(s => s.dismissTutorialMessage);
+
+  if (!tutorialMessage) return null;
+
+  return (
+    <motion.div
+      key={tutorialMessage}
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: -10 }}
+      className="mx-2 mb-1"
+    >
+      <button
+        onClick={dismissTutorialMessage}
+        className="w-full bg-blue-600/90 backdrop-blur-sm text-white text-sm font-bold px-4 py-2 rounded-xl shadow-lg text-center"
+      >
+        💡 {tutorialMessage}
+        <span className="block text-xs text-white/60 mt-0.5">タップで閉じる</span>
+      </button>
     </motion.div>
   );
 }
@@ -213,6 +238,48 @@ export default function GameScreen() {
   const isSetup = phase === 'setup';
   const setupPlayer = setupPhase ? players[setupPhase.currentPlayerIndex] : null;
 
+  /* ---- Banner shown on map overlay (setup / AI turn) ---- */
+  const bannerOverlay = (
+    <>
+      <AnimatePresence>
+        {isSetup && setupPlayer && (
+          <motion.div
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -20 }}
+            className="absolute top-2 left-1/2 -translate-x-1/2 z-20"
+          >
+            <div
+              className="text-center py-1.5 px-4 rounded-lg text-white text-sm font-heading font-bold shadow-lg whitespace-nowrap"
+              style={{ backgroundColor: setupPlayer.color + 'dd' }}
+            >
+              {setupPlayer.flagEmoji} {setupPlayer.name}の初期配置
+              {setupPhase?.round === 1 ? '（1回目）' : '（2回目）'}
+              {setupPlayer.isAI && ' — AI配置中…'}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+      <AnimatePresence>
+        {isPlayingAI && currentAIAction && (
+          <motion.div
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -20 }}
+            className="absolute top-2 left-1/2 -translate-x-1/2 z-20"
+          >
+            <div
+              className="text-center py-1.5 px-4 rounded-lg text-white text-sm font-heading font-bold shadow-lg whitespace-nowrap"
+              style={{ backgroundColor: currentAIAction.playerColor + 'dd' }}
+            >
+              {currentAIAction.playerFlag} {currentAIAction.playerName}が行動中…
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </>
+  );
+
   return (
     <div
       className="relative overflow-hidden select-none"
@@ -226,9 +293,8 @@ export default function GameScreen() {
       {/* Dark overlay for contrast */}
       <div className="absolute inset-0 bg-gradient-to-b from-black/20 via-transparent to-black/40 pointer-events-none" />
 
-      {/* Main Content Column */}
-      <div className="relative z-10 flex flex-col" style={{ height: '100dvh' }}>
-        {/* Top: Opponent Bar + Help Button */}
+      {/* ===== Mobile layout (< md): vertical single column ===== */}
+      <div className="relative z-10 flex flex-col md:hidden" style={{ height: '100dvh' }}>
         <div className="shrink-0 relative">
           <OpponentBar />
           <button
@@ -242,7 +308,6 @@ export default function GameScreen() {
           </AnimatePresence>
         </div>
 
-        {/* Setup Phase Banner */}
         <AnimatePresence>
           {isSetup && setupPlayer && (
             <motion.div
@@ -263,7 +328,6 @@ export default function GameScreen() {
           )}
         </AnimatePresence>
 
-        {/* AI Turn Banner - shows which AI is playing */}
         <AnimatePresence>
           {isPlayingAI && currentAIAction && (
             <motion.div
@@ -282,44 +346,63 @@ export default function GameScreen() {
           )}
         </AnimatePresence>
 
-        {/* Middle: Map + Dice (takes remaining space) */}
         <div className="flex-1 flex flex-col items-center justify-center gap-1 px-2 overflow-hidden">
           <HexMap />
           {!isPlayingAI && !isSetup && phase !== 'handoff' && <DiceRoller />}
         </div>
 
-        {/* Bottom Section: Log + Player + Actions */}
+        <AnimatePresence mode="wait">
+          <TutorialBubble />
+        </AnimatePresence>
+
         <div className="shrink-0 flex flex-col gap-1 pb-1">
-          {/* Game Log */}
           <GameLog />
-
-          {/* Player Panel */}
           {!isSetup && <PlayerPanel />}
-
-          {/* Action Menu - hidden during AI turns and setup */}
           {!isPlayingAI && !isSetup && phase !== 'handoff' && <ActionMenu />}
         </div>
       </div>
 
-      {/* AI Turn Overlay - staged animation */}
+      {/* ===== Desktop / Tablet layout (>= md): map left + sidebar right ===== */}
+      <div className="relative z-10 hidden md:flex" style={{ height: '100dvh' }}>
+        {/* Left: Map fills entire height */}
+        <div className="flex-1 relative overflow-hidden flex items-center justify-center p-2">
+          {bannerOverlay}
+          <button
+            onClick={() => setShowHelp(!showHelp)}
+            className="absolute top-2 right-2 z-30 bg-white/20 backdrop-blur-sm rounded-full p-1.5 text-white hover:bg-white/30 transition-colors"
+          >
+            <HelpCircle size={18} />
+          </button>
+          <AnimatePresence>
+            {showHelp && <TileHelpTooltip onClose={() => setShowHelp(false)} />}
+          </AnimatePresence>
+          <div className="w-full h-full overflow-auto flex items-center justify-center">
+            <HexMap />
+          </div>
+        </div>
+
+        {/* Right: Fixed sidebar */}
+        <div className="w-80 lg:w-96 shrink-0 flex flex-col gap-1.5 p-2 overflow-hidden bg-black/30 backdrop-blur-sm">
+          <OpponentBar />
+          {!isSetup && <PlayerPanel />}
+          {!isPlayingAI && !isSetup && phase !== 'handoff' && <DiceRoller />}
+          <AnimatePresence mode="wait">
+            <TutorialBubble />
+          </AnimatePresence>
+          {!isPlayingAI && !isSetup && phase !== 'handoff' && <ActionMenu />}
+          <div className="flex-1 min-h-0">
+            <GameLog />
+          </div>
+        </div>
+      </div>
+
+      {/* Overlay Components (shared for both layouts) */}
       <AITurnOverlay />
-
-      {/* Resource Gain Popup */}
       <ResourcePopup />
-
-      {/* Event Popup Overlay (handles resource-pick UI after EventCardDisplay) */}
       <EventPopup />
-
-      {/* Card Picker (5枚選択モード - dice 2/12) */}
       <CardPickerView />
-
-      {/* Event Card 3D flip display (replaces legacy card face) */}
       <EventCardDisplayHost />
-
-      {/* Quiz Popup Overlay */}
       <QuizPopup />
-
-      {/* Handoff Overlay for local multiplayer */}
       <AnimatePresence>
         <HandoffOverlay />
       </AnimatePresence>

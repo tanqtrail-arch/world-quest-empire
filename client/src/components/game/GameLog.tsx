@@ -52,7 +52,7 @@ function GameLog() {
   return (
     <div
       ref={scrollRef}
-      className="h-20 overflow-y-auto px-3 py-1.5 rounded-lg mx-2"
+      className="h-20 md:h-full overflow-y-auto px-3 py-1.5 rounded-lg mx-2 md:mx-0"
       style={{
         background: 'rgba(0,0,0,0.55)',
         backdropFilter: 'blur(4px)',

@@ -58,7 +58,9 @@ function DiceRoller() {
   const players = useGameStore(s => s.players);
   const currentPlayerIndex = useGameStore(s => s.currentPlayerIndex);
   const usedGoldDice = useGameStore(s => s.usedGoldDice);
+  const stageMode = useGameStore(s => s.stageMode);
   const [isRolling, setIsRolling] = useState(false);
+  const isSingleDice = stageMode?.diceCount === 1;
 
   const handleRoll = () => {
     if (phase !== 'rolling' || isRolling) return;
@@ -98,12 +100,14 @@ function DiceRoller() {
           >
             <DiceFace value={Math.ceil(Math.random() * 6)} />
           </motion.div>
-          <motion.div
-            animate={{ rotate: [0, -90, -180, -270, -360], scale: [1, 1.1, 1, 1.2, 1] }}
-            transition={{ duration: 0.6, ease: 'easeInOut' }}
-          >
-            <DiceFace value={Math.ceil(Math.random() * 6)} />
-          </motion.div>
+          {!isSingleDice && (
+            <motion.div
+              animate={{ rotate: [0, -90, -180, -270, -360], scale: [1, 1.1, 1, 1.2, 1] }}
+              transition={{ duration: 0.6, ease: 'easeInOut' }}
+            >
+              <DiceFace value={Math.ceil(Math.random() * 6)} />
+            </motion.div>
+          )}
         </div>
       )}
 
@@ -117,10 +121,12 @@ function DiceRoller() {
             className="flex items-center gap-2"
           >
             <DiceFace value={diceResult[0]} size={40} />
-            <DiceFace value={diceResult[1]} size={40} />
-            <div className="bg-amber-500 text-white font-score text-xl font-bold rounded-full w-9 h-9 flex items-center justify-center shadow-lg">
-              {diceTotal}
-            </div>
+            {!isSingleDice && <DiceFace value={diceResult[1]} size={40} />}
+            {!isSingleDice && (
+              <div className="bg-amber-500 text-white font-score text-xl font-bold rounded-full w-9 h-9 flex items-center justify-center shadow-lg">
+                {diceTotal}
+              </div>
+            )}
           </motion.div>
         )}
       </AnimatePresence>
