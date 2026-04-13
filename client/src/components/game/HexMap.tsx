@@ -11,7 +11,7 @@ import { TILE_INFO, RESOURCE_INFO, type ResourceType, type TileType, type GameTi
 import { getValidSettlementVertices, getValidRoadEdges } from '@/lib/gameLogic';
 import {
   HEX_SIZE, SVG_WIDTH, SVG_HEIGHT,
-  getTileCenter, getHexPoints,
+  getTileCenter, getHexPoints, getSvgDimensions,
 } from '@/lib/hexGeometry';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useRef, useMemo, memo, useCallback } from 'react';

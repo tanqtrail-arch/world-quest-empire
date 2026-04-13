@@ -32,16 +32,28 @@ const PADDING = 30;
 export const SVG_WIDTH = MAX_COLS * COL_SPACING + COL_SPACING / 2 + PADDING * 2;
 export const SVG_HEIGHT = (ROWS.length - 1) * ROW_SPACING + HEX_H + PADDING * 2;
 
+// --- SVG全体サイズを動的に計算（mapRows が渡されなければ ROWS を使用） ---
+export function getSvgDimensions(mapRows?: number[]): { width: number; height: number } {
+  const rows = mapRows ?? ROWS;
+  const maxCols = Math.max(...rows);
+  return {
+    width:  maxCols * COL_SPACING + COL_SPACING / 2 + PADDING * 2,
+    height: (rows.length - 1) * ROW_SPACING + HEX_H + PADDING * 2,
+  };
+}
+
 // --- Pointy-top hex: タイルのインデックスからピクセル中心座標を計算 ---
-export function getTileCenter(tileIndex: number): { x: number; y: number } {
+export function getTileCenter(tileIndex: number, mapRows?: number[]): { x: number; y: number } {
+  const rows = mapRows ?? ROWS;
+  const maxCols = Math.max(...rows);
   let idx = 0;
-  for (let row = 0; row < ROWS.length; row++) {
-    const count = ROWS[row];
+  for (let row = 0; row < rows.length; row++) {
+    const count = rows[row];
     for (let col = 0; col < count; col++) {
       if (idx === tileIndex) {
         // 中央揃え: 各行のタイル数に応じてオフセット
-        // 最大列数(5)に対して、少ない行は右にずらす
-        const rowOffsetX = ((MAX_COLS - count) / 2) * COL_SPACING;
+        // 最大列数に対して、少ない行は右にずらす
+        const rowOffsetX = ((maxCols - count) / 2) * COL_SPACING;
         const cx = PADDING + COL_SPACING / 2 + col * COL_SPACING + rowOffsetX;
         const cy = PADDING + HEX_SIZE + row * ROW_SPACING;
         return { x: cx, y: cy };
