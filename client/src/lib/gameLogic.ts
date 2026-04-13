@@ -359,7 +359,7 @@ export function getValidSettlementVertices(
   isSetupPhase: boolean
 ): string[] {
   return vertices
-    .filter(v => canBuildSettlement(v.id, playerId, vertices, settlements, roads, isSetupPhase, difficulty))
+    .filter(v => canBuildSettlement(v.id, playerId, vertices, settlements, roads, isSetupPhase))
     .map(v => v.id);
 }
 
