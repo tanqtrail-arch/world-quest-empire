@@ -9,7 +9,9 @@
  */
 import { useState, useEffect, useRef } from 'react';
 import { useGameStore } from '@/lib/gameStore';
-import { RESOURCE_INFO, QUIZ_TIMER_SECONDS, type ResourceType } from '@/lib/gameTypes';
+import { RESOURCE_INFO, type ResourceType } from '@/lib/gameTypes';
+
+const QUIZ_TIMER_SECONDS = 30;
 import { motion, AnimatePresence } from 'framer-motion';
 
 const resourceOrder: ResourceType[] = ['rubber', 'oil', 'gold', 'food'];

@@ -13,7 +13,7 @@ import PlayerPanel from '@/components/game/PlayerPanel';
 import DiceRoller from '@/components/game/DiceRoller';
 import ActionMenu from '@/components/game/ActionMenu';
 import EventPopup from '@/components/game/EventPopup';
-import EventCardDisplay from '@/components/game/EventCardDisplay';
+import EventCardDisplay, { CardPickerView } from '@/components/game/EventCardDisplay';
 import QuizPopup from '@/components/game/QuizPopup';
 import GameLog from '@/components/game/GameLog';
 import AITurnOverlay from '@/components/game/AITurnOverlay';
@@ -308,6 +308,9 @@ export default function GameScreen() {
 
       {/* Event Popup Overlay (handles resource-pick UI after EventCardDisplay) */}
       <EventPopup />
+
+      {/* Card Picker (5枚選択モード - dice 2/12) */}
+      <CardPickerView />
 
       {/* Event Card 3D flip display (replaces legacy card face) */}
       <EventCardDisplayHost />

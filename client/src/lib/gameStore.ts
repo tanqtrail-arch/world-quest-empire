@@ -18,6 +18,8 @@ import {
   aiChooseSetupVertex, aiChooseSetupRoad, aiTurn,
   type AITurnAction,
 } from './gameLogic';
+import { getStageById, updateStageResult } from './stageData';
+import type { StageSpecialRules } from './stageData';
 
 // Module-level timer registry for dice animation steps. Prevents leaks when
 // doRollDice is invoked again before the previous staged sequence finishes.
@@ -73,8 +75,15 @@ interface ResourceGainPopup {
 
 // --- Game Store Interface ---
 interface GameStore {
-  screen: 'title' | 'create' | 'game' | 'result';
+  screen: 'title' | 'create' | 'game' | 'result' | 'stage_select' | 'stage_clear';
   setScreen: (screen: GameStore['screen']) => void;
+
+  // Stage mode
+  stageMode: { stageId: number; specialRules: StageSpecialRules } | null;
+  stageClearStars: number;
+
+  // Card picker mode (dice 2/12)
+  cardPickerMode: { cards: EventCard[]; canRedraw: boolean } | null;
 
   // Game state
   players: Player[];
@@ -149,6 +158,15 @@ interface GameStore {
   // Setup phase actions
   setupPlaceSettlement: (vertexId: string) => void;
   setupPlaceRoad: (edgeId: string) => void;
+
+  // Stage mode
+  initStageGame: (stageId: number) => void;
+  checkStageClear: () => void;
+
+  // Card picker
+  cardPickerSelect: (card: EventCard) => void;
+  cardPickerRedraw: () => void;
+  cardPickerSkip: () => void;
 }
 
 export const useGameStore = create<GameStore>((set, get) => ({
@@ -195,6 +213,10 @@ export const useGameStore = create<GameStore>((set, get) => ({
   currentAIAction: null,
 
   handoffPlayerIndex: null,
+
+  stageMode: null,
+  stageClearStars: 0,
+  cardPickerMode: null,
 
   // =============================================
   // INIT GAME
@@ -600,39 +622,36 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
     // 7 → quiz only (no event card)
     if (diceTotal === 7) {
-      const quizPool = QUIZ_QUESTIONS.filter(q => q.difficulty === state.quizDifficulty);
-      if (quizPool.length === 0) {
-        set({ showResourceGains: false, highlightedTileIds: [], diceAnimationStep: 0 as 0 | 1 | 2 | 3 | 4 });
-        return;
-      }
-      const quiz = quizPool[Math.floor(Math.random() * quizPool.length)];
-
-    if (pendingEvent) {
       set({
         showResourceGains: false,
         highlightedTileIds: [],
-        phase: 'event',
-        currentEvent: pendingEvent,
-        pendingEvent: null,
+        diceAnimationStep: 0 as 0 | 1 | 2 | 3 | 4,
       });
       return;
     }
 
-    // 2 or 12 → draw an event card (rarest rolls)
-    if (diceTotal === 2 || diceTotal === 12) {
-      const drawn = EVENT_CARDS[Math.floor(Math.random() * EVENT_CARDS.length)];
-      const card: EventCard = { ...drawn, id: genId() };
-      const player = state.players[state.currentPlayerIndex];
+    // Pending event from previous turn
+    if (state.pendingEvent) {
       set({
         showResourceGains: false,
         highlightedTileIds: [],
         diceAnimationStep: 0 as 0 | 1 | 2 | 3 | 4,
         phase: 'event',
-        currentEvent: card,
-        gameLog: [
-          ...state.gameLog,
-          generateGameLog(`🎴 運命のカード (出目${diceTotal}): ${card.icon} ${card.title}`, 'event', player.id),
-        ],
+        currentEvent: state.pendingEvent,
+        pendingEvent: null,
+      });
+      return;
+    }
+
+    // 2 or 12 → draw 5 cards, let player pick one
+    if (diceTotal === 2 || diceTotal === 12) {
+      const shuffled = [...EVENT_CARDS].sort(() => Math.random() - 0.5);
+      const fiveCards: EventCard[] = shuffled.slice(0, 5).map(c => ({ ...c, id: genId() }));
+      set({
+        showResourceGains: false,
+        highlightedTileIds: [],
+        diceAnimationStep: 0 as 0 | 1 | 2 | 3 | 4,
+        cardPickerMode: { cards: fiveCards, canRedraw: true },
       });
       return;
     }
@@ -1200,6 +1219,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
             const parts = allRes.map(res => `${RESOURCE_INFO[res].icon}+1`);
             gainsSummaryParts.push(`${p.flagEmoji} ${parts.join(' ')}`);
           });
+        }
 
         logs.push(generateGameLog(`${aiP.name}がサイコロを振った！ 🎲 ${dice[0]} + ${dice[1]} = ${total}`, 'info', aiP.id));
 
@@ -1229,10 +1249,14 @@ export const useGameStore = create<GameStore>((set, get) => ({
           });
         }
 
-        // ----- 2 or 12 → draw an event card and apply to all sim players -----
+        // ----- 2 or 12 → draw 5 cards, AI picks best (positive priority) -----
         if (total === 2 || total === 12) {
-          const drawn = EVENT_CARDS[Math.floor(Math.random() * EVENT_CARDS.length)];
-          const aiCard: EventCard = { ...drawn, id: genId() };
+          const shuffledCards = [...EVENT_CARDS].sort(() => Math.random() - 0.5).slice(0, 5);
+          const priorityOrder: EventCard['category'][] = ['positive', 'special', 'negative'];
+          const sortedPicks = [...shuffledCards].sort((a, b) =>
+            priorityOrder.indexOf(a.category) - priorityOrder.indexOf(b.category)
+          );
+          const aiCard: EventCard = { ...sortedPicks[0], id: genId() };
           const aiCtx: EffectContext = {
             players: simPlayers,
             currentPlayerId: aiP.id,
@@ -1691,6 +1715,195 @@ export const useGameStore = create<GameStore>((set, get) => ({
   addLog: (message, type, playerId) => {
     const state = get();
     set({ gameLog: [...state.gameLog, generateGameLog(message, type, playerId)] });
+  },
+
+  // =============================================
+  // CARD PICKER (5枚選択モード)
+  // =============================================
+  cardPickerSelect: (card) => {
+    const state = get();
+    const player = state.players[state.currentPlayerIndex];
+    set({
+      cardPickerMode: null,
+      phase: 'event',
+      currentEvent: card,
+      gameLog: [
+        ...state.gameLog,
+        generateGameLog(`🎴 運命のカード: ${card.icon} ${card.title}`, 'event', player.id),
+      ],
+    });
+  },
+
+  cardPickerRedraw: () => {
+    const state = get();
+    if (!state.cardPickerMode?.canRedraw) return;
+    const shuffled = [...EVENT_CARDS].sort(() => Math.random() - 0.5);
+    const newCards: EventCard[] = shuffled.slice(0, 5).map(c => ({ ...c, id: genId() }));
+    set({ cardPickerMode: { cards: newCards, canRedraw: false } });
+  },
+
+  cardPickerSkip: () => {
+    const state = get();
+    const randomCard: EventCard = { ...EVENT_CARDS[Math.floor(Math.random() * EVENT_CARDS.length)], id: genId() };
+    const player = state.players[state.currentPlayerIndex];
+    set({
+      cardPickerMode: null,
+      phase: 'event',
+      currentEvent: randomCard,
+      gameLog: [
+        ...state.gameLog,
+        generateGameLog(`🎴 運命のカード（スキップ）: ${randomCard.icon} ${randomCard.title}`, 'event', player.id),
+      ],
+    });
+  },
+
+  // =============================================
+  // STAGE MODE
+  // =============================================
+  initStageGame: (stageId) => {
+    const stage = getStageById(stageId);
+    if (!stage) return;
+
+    const tiles = generateMap();
+    const finalTiles = stage.mapSize === 'mini' ? tiles.slice(0, 3).map((t, i) => ({ ...t, id: i })) : tiles;
+    const { vertices, edges } = generateVerticesAndEdges(finalTiles);
+
+    const humanPlayer = createPlayer('プレイヤー', 0, false, true);
+    const aiPlayers = stage.aiSlots.map((slot) =>
+      createPlayer(
+        PLAYER_COLORS[slot.countryIndex % PLAYER_COLORS.length].countryName,
+        slot.countryIndex,
+        true,
+        false,
+      )
+    );
+    const players = [humanPlayer, ...aiPlayers];
+
+    if (stage.specialRules.resourceHalved) {
+      for (const p of players) {
+        for (const key of Object.keys(p.resources) as (keyof typeof p.resources)[]) {
+          p.resources[key] = Math.floor(p.resources[key] / 2);
+        }
+      }
+    }
+
+    const maxTurns = stage.specialRules.turnLimit
+      ?? (stage.difficulty === 'easy' ? 15 : stage.difficulty === 'normal' ? 20 : 25);
+
+    const logs: GameLogEntry[] = [
+      generateGameLog(`🗺️ ステージ${stage.id}: ${stage.title}`, 'system'),
+      generateGameLog(stage.storyText, 'system'),
+    ];
+
+    set({
+      screen: 'game',
+      stageMode: { stageId, specialRules: stage.specialRules },
+      stageClearStars: 0,
+      cardPickerMode: null,
+      players,
+      tiles: finalTiles,
+      vertices,
+      edges,
+      settlements: [],
+      roads: [],
+      currentPlayerIndex: 0,
+      currentTurn: 1,
+      maxTurns,
+      phase: stage.specialRules.skipSetupPhase ? 'rolling' : 'setup',
+      diceResult: null,
+      difficulty: stage.difficulty,
+      gameLog: logs,
+      currentEvent: null,
+      pendingEvent: null,
+      winner: null,
+      longestRoadPlayerId: null,
+      tradeBlocked: false,
+      tempVP: [],
+      peaceTreatyTurns: 0,
+      blockedSettlementId: null,
+      setupPhase: stage.specialRules.skipSetupPhase ? null : {
+        currentPlayerIndex: 0,
+        round: 1,
+        step: 'place_settlement',
+        lastPlacedVertexId: null,
+      },
+      buildMode: null,
+      selectedVertexId: null,
+      selectedEdgeId: null,
+      highlightedTileIds: [],
+      highlightedVertexIds: [],
+      highlightedEdgeIds: [],
+      showResourceGains: false,
+      resourceGains: [],
+      diceAnimationStep: 0 as 0 | 1 | 2 | 3 | 4,
+      isPlayingAI: false,
+      aiActionQueue: [],
+      currentAIAction: null,
+      handoffPlayerIndex: null,
+    });
+  },
+
+  checkStageClear: () => {
+    const state = get();
+    if (!state.stageMode) return;
+
+    const stage = getStageById(state.stageMode.stageId);
+    if (!stage) return;
+
+    const human = state.players.find(p => p.isHuman);
+    if (!human) return;
+
+    const c = stage.clearCondition;
+    let cleared = false;
+
+    switch (c.type) {
+      case 'vp': {
+        if (human.victoryPoints >= c.value) {
+          if (c.beforeAI) {
+            const aiReached = state.players.some(p => p.isAI && p.victoryPoints >= c.value);
+            cleared = !aiReached;
+          } else {
+            cleared = true;
+          }
+        }
+        break;
+      }
+      case 'settlements': {
+        const count = state.settlements.filter(s => s.playerId === human.id).length;
+        cleared = count >= c.value;
+        break;
+      }
+      case 'ports': {
+        // Ports not in simplified map — use settlement count as fallback
+        const settlementCount = state.settlements.filter(s => s.playerId === human.id).length;
+        cleared = settlementCount >= c.value;
+        break;
+      }
+      case 'survive_turns': {
+        cleared = state.currentTurn >= c.value && human.victoryPoints >= (c.minVP ?? 0);
+        break;
+      }
+      case 'coop_vp': {
+        const allMeetMin = state.players.every(p => p.victoryPoints >= (c.minVPEach ?? 0));
+        const totalVP = state.players.reduce((s, p) => s + p.victoryPoints, 0);
+        cleared = allMeetMin && totalVP >= c.value;
+        break;
+      }
+    }
+
+    if (cleared) {
+      let stars = 1;
+      if (state.currentTurn <= stage.starConditions.star2TurnLimit) {
+        stars = 2;
+      }
+      // star3 requires quiz perfect — but quiz system may not be active in simplified mode
+      if (state.currentTurn <= stage.starConditions.star3TurnLimit) {
+        stars = 3;
+      }
+
+      updateStageResult(stage.id, stars, state.currentTurn);
+      set({ stageClearStars: stars, screen: 'stage_clear' });
+    }
   },
 
   // Legacy compatibility

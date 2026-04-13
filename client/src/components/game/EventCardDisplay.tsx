@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import type { EventCard } from '@/lib/gameTypes';
+import { useGameStore } from '@/lib/gameStore';
 
 // =============================================
 // EventCardDisplay - 3Dフリップ演出付きカード表示
@@ -351,6 +352,104 @@ export default function EventCardDisplay({
           </motion.div>
         </motion.div>
       )}
+    </AnimatePresence>
+  );
+}
+
+// =============================================
+// CardPickerView - 5枚から1枚選ぶUI
+// =============================================
+
+const categoryColors_picker = categoryColors;
+
+function MiniCard({ card, index, onSelect }: { card: EventCard; index: number; onSelect: (c: EventCard) => void }) {
+  const colors = categoryColors_picker[card.category];
+  return (
+    <motion.button
+      initial={{ y: 40, opacity: 0, rotateY: 180 }}
+      animate={{ y: 0, opacity: 1, rotateY: 0 }}
+      transition={{ delay: 0.15 * index, type: 'spring', stiffness: 250, damping: 20 }}
+      whileTap={{ scale: 0.92 }}
+      onClick={() => onSelect(card)}
+      className={`relative flex flex-col items-center rounded-xl border-2 ${colors.border} overflow-hidden shadow-lg active:shadow-md transition-shadow`}
+      style={{ width: 110, minHeight: 150 }}
+    >
+      <div className={`absolute inset-0 bg-gradient-to-b ${colors.bg}`} />
+      <div className="relative z-10 flex flex-col items-center p-2 h-full">
+        <span className={`text-[9px] px-1.5 py-0.5 rounded-full ${colors.effectBg} ${colors.accent} font-bold mb-1`}>
+          {card.category === 'negative' ? '⚠️' : card.category === 'positive' ? '✨' : '🔮'}
+        </span>
+        <span className="text-3xl mb-1">{card.icon}</span>
+        <span className="text-white text-[11px] font-bold text-center leading-tight line-clamp-2">
+          {card.title}
+        </span>
+        <div className="flex-1" />
+        <span className="text-white/40 text-[9px] mt-1">タップで選択</span>
+      </div>
+    </motion.button>
+  );
+}
+
+export function CardPickerView() {
+  const cardPickerMode = useGameStore(s => s.cardPickerMode);
+  const cardPickerSelect = useGameStore(s => s.cardPickerSelect);
+  const cardPickerRedraw = useGameStore(s => s.cardPickerRedraw);
+  const cardPickerSkip = useGameStore(s => s.cardPickerSkip);
+
+  if (!cardPickerMode) return null;
+
+  const { cards, canRedraw } = cardPickerMode;
+
+  return (
+    <AnimatePresence>
+      <motion.div
+        className="fixed inset-0 z-50 flex flex-col items-center justify-center"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+      >
+        <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" />
+
+        <div className="relative z-10 flex flex-col items-center gap-4 px-3 max-w-lg w-full">
+          <motion.div
+            initial={{ y: -20, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            className="text-center"
+          >
+            <div className="text-4xl mb-1">🃏</div>
+            <h2 className="text-white font-bold text-lg drop-shadow">運命のカードを選べ！</h2>
+            <p className="text-white/60 text-xs">5枚の中から1枚を選ぼう</p>
+          </motion.div>
+
+          <div className="flex flex-wrap justify-center gap-2">
+            {cards.map((card, i) => (
+              <MiniCard key={card.id} card={card} index={i} onSelect={cardPickerSelect} />
+            ))}
+          </div>
+
+          <motion.div
+            initial={{ y: 20, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            transition={{ delay: 0.8 }}
+            className="flex gap-3"
+          >
+            {canRedraw && (
+              <button
+                onClick={cardPickerRedraw}
+                className="px-4 py-2 rounded-xl bg-amber-500/20 border border-amber-500/40 text-amber-300 text-sm font-bold active:scale-95 transition-transform"
+              >
+                🔄 引き直す（1回）
+              </button>
+            )}
+            <button
+              onClick={cardPickerSkip}
+              className="px-4 py-2 rounded-xl bg-white/10 border border-white/20 text-white/60 text-sm font-bold active:scale-95 transition-transform"
+            >
+              スキップ
+            </button>
+          </motion.div>
+        </div>
+      </motion.div>
     </AnimatePresence>
   );
 }

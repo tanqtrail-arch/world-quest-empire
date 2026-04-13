@@ -68,6 +68,13 @@ export default function TitleScreen() {
         </button>
 
         <button
+          onClick={() => setScreen('stage_select')}
+          className="game-btn-gold text-xl py-4 rounded-2xl"
+        >
+          🗺️ ステージモード
+        </button>
+
+        <button
           onClick={() => toast('📖 ルールはゲーム中にヘルプボタン(?)から確認できます！')}
           className="game-btn-gold text-xl py-4 rounded-2xl"
         >

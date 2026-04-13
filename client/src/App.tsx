@@ -10,6 +10,8 @@ import TitleScreen from "./pages/TitleScreen";
 import CreateRoom from "./pages/CreateRoom";
 import GameScreen from "./pages/GameScreen";
 import ResultScreen from "./pages/ResultScreen";
+import StageSelectScreen from "./pages/StageSelectScreen";
+import StageClearScreen from "./pages/StageClearScreen";
 
 function ScreenRouter() {
   const screen = useGameStore(s => s.screen);
@@ -20,8 +22,8 @@ function ScreenRouter() {
     case 'create':        content = <CreateRoom />; break;
     case 'game':          content = <GameScreen />; break;
     case 'result':        content = <ResultScreen />; break;
-    case 'ranking':       content = <RankingScreen />; break;
-    case 'quiz_practice': content = <QuizPracticeScreen />; break;
+    case 'stage_select':  content = <StageSelectScreen />; break;
+    case 'stage_clear':   content = <StageClearScreen />; break;
     default:              content = <TitleScreen />;
   }
   // `key` forces React to remount on every screen change so the fade-in
