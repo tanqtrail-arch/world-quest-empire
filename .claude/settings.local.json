@@ -30,7 +30,11 @@
       "Bash(curl -s http://localhost:3000)",
       "WebFetch(domain:localhost)",
       "Bash(curl -s http://localhost:3003)",
-      "Bash(grep -v \"^--$\")"
+      "Bash(grep -v \"^--$\")",
+      "Bash(curl -s http://localhost:5173 -o /dev/null -w \"%{http_code}\\\\n\")",
+      "Bash(curl -s http://localhost:3000 -o /dev/null -w \"%{http_code}\\\\n\")",
+      "Bash(curl:*)",
+      "Bash(kill %1)"
     ]
   }
 }

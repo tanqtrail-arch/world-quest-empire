@@ -37,6 +37,14 @@ export default function GamblePopup() {
     }
   }, [stage, dismissGamble]);
 
+  // Auto-resolve no-dice cards (must stay above early return)
+  useEffect(() => {
+    if (flipped && stage === 'reveal' && card && !card.needsDice) {
+      const t = setTimeout(() => resolveGamble(0), 800);
+      return () => clearTimeout(t);
+    }
+  }, [flipped, stage, card, resolveGamble]);
+
   if (phase !== 'gamble' || !card) return null;
 
   const handleFlip = () => setFlipped(true);
@@ -59,14 +67,6 @@ export default function GamblePopup() {
       }
     }, 100);
   };
-
-  // Auto-resolve no-dice cards
-  useEffect(() => {
-    if (flipped && stage === 'reveal' && card && !card.needsDice) {
-      const t = setTimeout(() => resolveGamble(0), 800);
-      return () => clearTimeout(t);
-    }
-  }, [flipped, stage, card, resolveGamble]);
 
   const showCardFront = flipped;
   const showRollButton = flipped && card.needsDice && stage === 'reveal' && !rolling;
