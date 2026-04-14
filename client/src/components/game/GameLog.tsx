@@ -8,7 +8,6 @@ import { useRef, useEffect, useState, memo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 function GameLog() {
-  console.count('[render] GameLog');
   const gameLog = useGameStore(s => s.gameLog);
   const players = useGameStore(s => s.players);
   const scrollRef = useRef<HTMLDivElement>(null);

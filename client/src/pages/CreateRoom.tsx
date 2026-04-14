@@ -6,7 +6,7 @@
  * - 難易度選択
  */
 import { useState } from 'react';
-import { useGameStore } from '@/lib/gameStore';
+import { useGameStore, AI_SPEED_INFO, type AISpeed } from '@/lib/gameStore';
 import { PLAYER_COLORS, type Difficulty, type PlayerSlot } from '@/lib/gameTypes';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ArrowLeft, Bot, User, Plus, Minus } from 'lucide-react';
@@ -21,6 +21,8 @@ const DEFAULT_SLOTS: PlayerSlot[] = [
 
 export default function CreateRoom() {
   const { setScreen, initGame } = useGameStore();
+  const aiSpeed = useGameStore(s => s.aiSpeed);
+  const setAiSpeed = useGameStore(s => s.setAiSpeed);
   const [slots, setSlots] = useState<PlayerSlot[]>(DEFAULT_SLOTS);
   const [difficulty, setDifficulty] = useState<Difficulty>('normal');
 
@@ -239,6 +241,34 @@ export default function CreateRoom() {
               </button>
             ))}
           </div>
+        </div>
+
+        {/* AI Speed */}
+        <div className="mb-5">
+          <label className="block font-heading font-bold text-amber-800 mb-1.5 text-base">
+            🤖 AIの速さ
+          </label>
+          <div className="flex gap-2">
+            {(['slow', 'normal', 'fast'] as AISpeed[]).map(sp => {
+              const info = AI_SPEED_INFO[sp];
+              const active = aiSpeed === sp;
+              return (
+                <button
+                  key={sp}
+                  onClick={() => setAiSpeed(sp)}
+                  className={`flex-1 py-2.5 px-2 rounded-xl font-heading font-bold transition-all ${
+                    active
+                      ? 'bg-amber-500 text-white shadow-lg scale-105 border-3 border-amber-500'
+                      : 'bg-white text-amber-800 border-3 border-amber-300 hover:border-amber-500'
+                  }`}
+                >
+                  <div className="text-xl leading-none">{info.icon}</div>
+                  <div className="text-xs mt-1">{info.label}</div>
+                </button>
+              );
+            })}
+          </div>
+          <p className="text-amber-700/70 text-xs mt-1.5">プレイ中も画面右上から変更できます</p>
         </div>
 
         {/* Start Button */}

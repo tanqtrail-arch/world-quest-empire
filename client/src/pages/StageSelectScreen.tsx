@@ -100,7 +100,7 @@ function StageNode({
       initial={{ scale: 0, opacity: 0 }}
       animate={{ scale: 1, opacity: 1 }}
       transition={{ delay: stage.id * 0.06, type: 'spring', stiffness: 300, damping: 20 }}
-      className={`relative flex items-center gap-3 w-full rounded-2xl p-3 transition-all
+      className={`relative flex items-center gap-3 w-full rounded-2xl p-3 transition-all touch-manipulation
         ${unlocked ? 'cursor-pointer active:scale-95' : 'cursor-not-allowed opacity-50'}
         bg-gradient-to-r ${nodeColor} shadow-lg`}
       style={{ minHeight: 64 }}
@@ -178,10 +178,11 @@ function StageDetailModal({
         exit={{ y: 40, scale: 0.95, opacity: 0 }}
         transition={{ type: 'spring', stiffness: 300, damping: 25 }}
         onClick={(e) => e.stopPropagation()}
-        className="bg-gradient-to-b from-[#1a1a3e] to-[#0f0f2a] rounded-3xl shadow-2xl w-full max-w-md overflow-hidden border border-white/10"
+        className="bg-gradient-to-b from-[#1a1a3e] to-[#0f0f2a] rounded-3xl shadow-2xl w-full max-w-md border border-white/10 flex flex-col"
+        style={{ maxHeight: '85vh' }}
       >
-        {/* Header */}
-        <div className="bg-gradient-to-r from-amber-500/20 to-indigo-500/20 px-5 pt-5 pb-4">
+        {/* Header (固定) */}
+        <div className="bg-gradient-to-r from-amber-500/20 to-indigo-500/20 px-5 pt-5 pb-4 shrink-0 rounded-t-3xl">
           <div className="flex items-center gap-3">
             <div className="w-12 h-12 rounded-xl bg-white/10 flex items-center justify-center text-2xl font-black text-white">
               {stage.id}
@@ -208,8 +209,11 @@ function StageDetailModal({
           </div>
         </div>
 
-        {/* Story */}
-        <div className="px-5 py-4 space-y-3">
+        {/* Story (中央スクロール領域) */}
+        <div
+          className="px-5 py-4 space-y-3 overflow-y-auto flex-1 min-h-0"
+          style={{ WebkitOverflowScrolling: 'touch' }}
+        >
           <p className="text-white/80 text-sm leading-relaxed">
             {stage.storyText}
           </p>
@@ -252,8 +256,8 @@ function StageDetailModal({
           </div>
         </div>
 
-        {/* Buttons */}
-        <div className="px-5 pb-5 flex gap-3">
+        {/* Buttons (固定 — 必ず見える) */}
+        <div className="px-5 py-4 flex gap-3 shrink-0 border-t border-white/10 rounded-b-3xl bg-[#0f0f2a]">
           <button
             onClick={onClose}
             className="flex-1 py-3 rounded-xl bg-white/10 text-white font-bold text-sm active:scale-95 transition-transform"
@@ -347,74 +351,76 @@ export default function StageSelectScreen() {
 
   return (
     <div
-      className="min-h-screen flex flex-col relative overflow-hidden"
+      className="fixed inset-0 bg-[#1a1a2e] overflow-y-auto"
       style={{
+        WebkitOverflowScrolling: 'touch',
         backgroundImage: `url(${HERO_BG})`,
         backgroundSize: 'cover',
         backgroundPosition: 'center',
+        backgroundAttachment: 'fixed',
       }}
     >
-      {/* Overlay */}
-      <div className="absolute inset-0 bg-gradient-to-b from-[#0a0a1a]/90 via-[#0a0a1a]/80 to-[#0a0a1a]/95" />
+      {/* Dark overlay (背景にfixedで貼る) */}
+      <div className="fixed inset-0 bg-gradient-to-b from-[#0a0a1a]/90 via-[#0a0a1a]/80 to-[#0a0a1a]/95 pointer-events-none" />
 
-      {/* Header */}
-      <motion.div
-        initial={{ y: -30, opacity: 0 }}
-        animate={{ y: 0, opacity: 1 }}
-        className="relative z-10 px-4 pt-4 pb-2"
-      >
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => setScreen('title')}
-            className="w-10 h-10 rounded-xl bg-white/10 flex items-center justify-center text-white text-lg active:scale-90 transition-transform"
-          >
-            ←
-          </button>
-          <div className="flex-1">
-            <h1 className="text-white font-black text-lg">🗺️ ステージモード</h1>
-          </div>
-          <div className="bg-amber-500/20 rounded-xl px-3 py-1.5 flex items-center gap-1.5">
-            <span className="text-amber-400 text-sm font-bold">★ {totalStars}</span>
-            <span className="text-white/40 text-xs">/ {maxStars}</span>
-          </div>
-        </div>
-
-        {/* Progress bar */}
-        <div className="mt-3 h-2 bg-white/10 rounded-full overflow-hidden">
-          <motion.div
-            initial={{ width: 0 }}
-            animate={{ width: `${(totalStars / maxStars) * 100}%` }}
-            transition={{ delay: 0.3, duration: 0.8, ease: 'easeOut' }}
-            className="h-full bg-gradient-to-r from-amber-400 to-orange-400 rounded-full"
-          />
-        </div>
-      </motion.div>
-
-      {/* Stage list (scrollable route) */}
-      <div className="relative z-10 flex-1 overflow-y-auto px-4 py-4 space-y-1">
-        {STAGES.map((stage, i) => {
-          const unlocked = isStageUnlocked(stage.id, progress);
-          const isNext = stage.id === nextStageId;
-          const prevCleared = i > 0 && !!progress[STAGES[i - 1].id]?.cleared;
-          const section = SECTION_BREAKS[stage.id];
-
-          return (
-            <div key={stage.id}>
-              {section && <SectionHeader title={section.title} subtitle={section.subtitle} />}
-              {i > 0 && !section && <Connector cleared={prevCleared} />}
-              <StageNode
-                stage={stage}
-                progress={progress}
-                unlocked={unlocked}
-                isNext={isNext}
-                onSelect={setSelectedStage}
-              />
+      {/* コンテンツコンテナ — min-h-fullで高さ制限なし、pb-20で下部余白 */}
+      <div className="relative min-h-full p-4 pb-20">
+        {/* Header */}
+        <motion.div
+          initial={{ y: -30, opacity: 0 }}
+          animate={{ y: 0, opacity: 1 }}
+          className="relative z-10 mb-3"
+        >
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setScreen('title')}
+              className="w-10 h-10 rounded-xl bg-white/10 flex items-center justify-center text-white text-lg active:scale-90 transition-transform"
+            >
+              ←
+            </button>
+            <div className="flex-1">
+              <h1 className="text-white font-black text-lg">🗺️ ステージモード</h1>
             </div>
-          );
-        })}
+            <div className="bg-amber-500/20 rounded-xl px-3 py-1.5 flex items-center gap-1.5">
+              <span className="text-amber-400 text-sm font-bold">★ {totalStars}</span>
+              <span className="text-white/40 text-xs">/ {maxStars}</span>
+            </div>
+          </div>
 
-        {/* Bottom spacer */}
-        <div className="h-8" />
+          {/* Progress bar */}
+          <div className="mt-3 h-2 bg-white/10 rounded-full overflow-hidden">
+            <motion.div
+              initial={{ width: 0 }}
+              animate={{ width: `${(totalStars / maxStars) * 100}%` }}
+              transition={{ delay: 0.3, duration: 0.8, ease: 'easeOut' }}
+              className="h-full bg-gradient-to-r from-amber-400 to-orange-400 rounded-full"
+            />
+          </div>
+        </motion.div>
+
+        {/* Stage list */}
+        <div className="relative z-10 space-y-1">
+          {STAGES.map((stage, i) => {
+            const unlocked = isStageUnlocked(stage.id, progress);
+            const isNext = stage.id === nextStageId;
+            const prevCleared = i > 0 && !!progress[STAGES[i - 1].id]?.cleared;
+            const section = SECTION_BREAKS[stage.id];
+
+            return (
+              <div key={stage.id}>
+                {section && <SectionHeader title={section.title} subtitle={section.subtitle} />}
+                {i > 0 && !section && <Connector cleared={prevCleared} />}
+                <StageNode
+                  stage={stage}
+                  progress={progress}
+                  unlocked={unlocked}
+                  isNext={isNext}
+                  onSelect={setSelectedStage}
+                />
+              </div>
+            );
+          })}
+        </div>
       </div>
 
       {/* Stage detail modal */}

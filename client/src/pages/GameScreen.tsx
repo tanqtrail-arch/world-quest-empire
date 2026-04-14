@@ -13,15 +13,34 @@ import DiceRoller from '@/components/game/DiceRoller';
 import ActionMenu from '@/components/game/ActionMenu';
 import EventPopup from '@/components/game/EventPopup';
 import EventCardDisplay, { CardPickerView } from '@/components/game/EventCardDisplay';
+import GamblePopup from '@/components/game/GamblePopup';
 import QuizPopup from '@/components/game/QuizPopup';
 import GameLog from '@/components/game/GameLog';
 import AITurnOverlay from '@/components/game/AITurnOverlay';
 import ResourcePopup from '@/components/game/ResourcePopup';
-import { useGameStore } from '@/lib/gameStore';
+import { useGameStore, AI_SPEED_INFO } from '@/lib/gameStore';
 import { useState, useEffect, useRef } from 'react';
 import { TURN_TIMER_SECONDS } from '@/lib/gameTypes';
 import { motion, AnimatePresence } from 'framer-motion';
 import { HelpCircle, X } from 'lucide-react';
+
+// AI speed cycle button (slow → normal → fast → slow…)
+// 丸いアイコンボタン: 🐢/🏃/⚡をタップでサイクル切替
+function AISpeedButton({ className = '' }: { className?: string }) {
+  const aiSpeed = useGameStore(s => s.aiSpeed);
+  const cycleAiSpeed = useGameStore(s => s.cycleAiSpeed);
+  const info = AI_SPEED_INFO[aiSpeed];
+  return (
+    <button
+      onClick={cycleAiSpeed}
+      title={`AI速度: ${info.label}（タップで切替）`}
+      aria-label={`AI速度: ${info.label}`}
+      className={`w-10 h-10 rounded-full bg-black/50 hover:bg-black/70 active:scale-90 backdrop-blur-sm text-white flex items-center justify-center text-xl shadow-lg border border-white/20 transition-all ${className}`}
+    >
+      <span className="leading-none">{info.icon}</span>
+    </button>
+  );
+}
 
 const BOARD_BG = 'https://d2xsxph8kpxj0f.cloudfront.net/310519663286960690/RthryRhRZNJvzXLKUFJiBd/game-board-bg-8s6c49wGQN8mc2Rzb2agwx.webp';
 
@@ -92,7 +111,6 @@ function TutorialBubble() {
 
 // Event card 3D flip host — shows human's drawn card (phase==='event') or AI's drawn card
 function EventCardDisplayHost() {
-  console.count('[render] EventCardDisplayHost');
   const phase = useGameStore(s => s.phase);
   const currentEvent = useGameStore(s => s.currentEvent);
   const currentAIAction = useGameStore(s => s.currentAIAction);
@@ -227,7 +245,6 @@ function TurnTimerDisplay() {
 }
 
 export default function GameScreen() {
-  console.count('[render] GameScreen');
   const phase = useGameStore(s => s.phase);
   const isPlayingAI = useGameStore(s => s.isPlayingAI);
   const currentAIAction = useGameStore(s => s.currentAIAction);
@@ -297,12 +314,17 @@ export default function GameScreen() {
       <div className="relative z-10 flex flex-col md:hidden" style={{ height: '100dvh' }}>
         <div className="shrink-0 relative">
           <OpponentBar />
-          <button
-            onClick={() => setShowHelp(!showHelp)}
-            className="absolute top-2 right-2 bg-white/20 backdrop-blur-sm rounded-full p-1.5 text-white hover:bg-white/30 transition-colors"
-          >
-            <HelpCircle size={18} />
-          </button>
+          {/* 右上の固定ボタン群: 速度切替 + ヘルプ (z-50で最前面) */}
+          <div className="absolute top-2 right-2 z-50 flex items-center gap-1.5">
+            <AISpeedButton />
+            <button
+              onClick={() => setShowHelp(!showHelp)}
+              aria-label="ヘルプ"
+              className="w-10 h-10 rounded-full bg-black/50 hover:bg-black/70 active:scale-90 backdrop-blur-sm text-white flex items-center justify-center shadow-lg border border-white/20 transition-all"
+            >
+              <HelpCircle size={20} />
+            </button>
+          </div>
           <AnimatePresence>
             {showHelp && <TileHelpTooltip onClose={() => setShowHelp(false)} />}
           </AnimatePresence>
@@ -367,12 +389,15 @@ export default function GameScreen() {
         {/* Left: Map fills entire height */}
         <div className="flex-1 relative overflow-hidden flex items-center justify-center p-2">
           {bannerOverlay}
-          <button
-            onClick={() => setShowHelp(!showHelp)}
-            className="absolute top-2 right-2 z-30 bg-white/20 backdrop-blur-sm rounded-full p-1.5 text-white hover:bg-white/30 transition-colors"
-          >
-            <HelpCircle size={18} />
-          </button>
+          <div className="absolute top-2 right-2 z-50">
+            <button
+              onClick={() => setShowHelp(!showHelp)}
+              aria-label="ヘルプ"
+              className="w-10 h-10 rounded-full bg-black/50 hover:bg-black/70 active:scale-90 backdrop-blur-sm text-white flex items-center justify-center shadow-lg border border-white/20 transition-all"
+            >
+              <HelpCircle size={20} />
+            </button>
+          </div>
           <AnimatePresence>
             {showHelp && <TileHelpTooltip onClose={() => setShowHelp(false)} />}
           </AnimatePresence>
@@ -381,8 +406,16 @@ export default function GameScreen() {
           </div>
         </div>
 
-        {/* Right: Fixed sidebar */}
-        <div className="w-80 lg:w-96 shrink-0 flex flex-col gap-1.5 p-2 overflow-hidden bg-black/30 backdrop-blur-sm">
+        {/* Right: Fixed sidebar (内容が画面高を超えたら内部でスクロール可能) */}
+        <div
+          className="w-80 lg:w-96 shrink-0 flex flex-col gap-1.5 p-2 overflow-y-auto bg-black/30 backdrop-blur-sm"
+          style={{ WebkitOverflowScrolling: 'touch', overscrollBehavior: 'contain' }}
+        >
+          {/* AI速度切替 (サイドバー上部) */}
+          <div className="flex items-center justify-end gap-2 shrink-0">
+            <span className="text-white/70 text-xs font-bold">AI速度</span>
+            <AISpeedButton />
+          </div>
           <OpponentBar />
           {!isSetup && <PlayerPanel />}
           {!isPlayingAI && !isSetup && phase !== 'handoff' && <DiceRoller />}
@@ -402,6 +435,7 @@ export default function GameScreen() {
       <EventPopup />
       <CardPickerView />
       <EventCardDisplayHost />
+      <GamblePopup />
       <QuizPopup />
       <AnimatePresence>
         <HandoffOverlay />

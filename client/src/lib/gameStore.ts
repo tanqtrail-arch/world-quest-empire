@@ -6,7 +6,7 @@ import {
   type EventCard, type GameLogEntry, type Difficulty, type GamePhase,
   type SetupStep, type PlayerSlot, type QuizQuestion, type Port,
   BUILD_COSTS, VP_VALUES, WINNING_SCORE, PLAYER_COLORS,
-  RESOURCE_INFO, TURN_TIMER_SECONDS,
+  RESOURCE_INFO, TURN_TIMER_SECONDS, QUIZ_QUESTIONS,
 } from './gameTypes';
 import { EVENT_CARDS } from './eventCards';
 import { applyEventEffect, type EffectContext } from './eventCardEffects';
@@ -17,10 +17,39 @@ import {
   getValidRoadEdges, getUpgradeableVertices, calculateLongestRoad,
   getRandomEvent, generateGameLog, genId,
   aiChooseSetupVertex, aiChooseSetupRoad, aiTurn,
+  generatePorts, getTradeRate,
   type AITurnAction,
 } from './gameLogic';
+import { GAMBLE_CARDS, pickRandomGambleCard, type GambleCard, type GambleResolveResult } from './gambleCards';
 import { getStageById, updateStageResult } from './stageData';
 import type { StageSpecialRules } from './stageData';
+
+// AI playback speed (used by AITurnOverlay to scale ACTION_DURATIONS)
+export type AISpeed = 'slow' | 'normal' | 'fast';
+
+export const AI_SPEED_MULTIPLIER: Record<AISpeed, number> = {
+  slow: 2.0,
+  normal: 1.0,
+  fast: 0.3,
+};
+
+export const AI_SPEED_INFO: Record<AISpeed, { icon: string; label: string }> = {
+  slow:   { icon: '🐢', label: 'じっくり' },
+  normal: { icon: '🏃', label: 'ふつう' },
+  fast:   { icon: '⚡', label: 'はやい' },
+};
+
+const AI_SPEED_STORAGE_KEY = 'wqe_ai_speed';
+function loadAiSpeed(): AISpeed {
+  try {
+    const v = localStorage.getItem(AI_SPEED_STORAGE_KEY);
+    if (v === 'slow' || v === 'normal' || v === 'fast') return v;
+  } catch {}
+  return 'normal';
+}
+function saveAiSpeed(speed: AISpeed): void {
+  try { localStorage.setItem(AI_SPEED_STORAGE_KEY, speed); } catch {}
+}
 
 // Module-level timer registry for dice animation steps. Prevents leaks when
 // doRollDice is invoked again before the previous staged sequence finishes.
@@ -86,8 +115,21 @@ interface GameStore {
   tutorialMessage: string | null; // チュートリアル吹き出しメッセージ
   dismissTutorialMessage: () => void;
 
-  // Card picker mode (dice 2/12)
+  // AI speed (slow/normal/fast) — game-wide playback speed for AI animation
+  aiSpeed: AISpeed;
+  setAiSpeed: (speed: AISpeed) => void;
+  cycleAiSpeed: () => void;
+
+  // Card picker mode (dice 2/12) — legacy
   cardPickerMode: { cards: EventCard[]; canRedraw: boolean } | null;
+
+  // Gamble card mode (dice 2/12) — new system
+  gambleCard: GambleCard | null;
+  gambleStage: 'reveal' | 'rolling' | 'result' | null;
+  gambleDiceRoll: number | null;
+  gambleResult: GambleResolveResult | null;
+  resolveGamble: (diceRoll: number) => void;
+  dismissGamble: () => void;
 
   // Game state
   players: Player[];
@@ -267,6 +309,11 @@ export const useGameStore = create<GameStore>((set, get) => ({
   tradeCount: 0,
   tutorialMessage: null,
   cardPickerMode: null,
+  gambleCard: null,
+  gambleStage: null,
+  gambleDiceRoll: null,
+  gambleResult: null,
+  aiSpeed: loadAiSpeed(),
 
   ports: [],
   mapRows: undefined,
@@ -291,6 +338,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
   initGame: (slots, difficulty) => {
     const tiles = generateMap();
     const { vertices, edges } = generateVerticesAndEdges(tiles);
+    const ports = generatePorts(edges);
 
     const players = slots.map((slot, i) => {
       const colorInfo = PLAYER_COLORS[slot.countryIndex % PLAYER_COLORS.length];
@@ -315,6 +363,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
       tiles,
       vertices,
       edges,
+      ports,
       settlements: [],
       roads: [],
       currentPlayerIndex: 0,
@@ -571,7 +620,23 @@ export const useGameStore = create<GameStore>((set, get) => ({
       });
     });
 
-    if (gains.length === 0) {
+    // ===== Lucky 7: 全員全資源+1 =====
+    if (total === 7) {
+      const allRes: ResourceType[] = ['rubber', 'oil', 'gold', 'food'];
+      newPlayers.forEach(p => {
+        allRes.forEach(res => { p.resources[res] += 1; });
+        // 1人につき1つの代表popup（rubber）— DiceResultZoomで全資源詳細を表示
+        resourceGainPopups.push({
+          playerId: p.id,
+          playerName: p.name,
+          playerFlag: p.flagEmoji,
+          playerColor: p.color,
+          resource: 'rubber',
+          amount: 1,
+        });
+      });
+      logs.push(generateGameLog(`🎉 ラッキー7！全プレイヤーが全資源+1！`, 'resource', currentPlayer.id));
+    } else if (gains.length === 0) {
       logs.push(generateGameLog(`出目${total}では誰も資源をもらえなかった。`, 'info'));
     }
 
@@ -698,6 +763,23 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
     // 7 → quiz only (no event card)
     if (diceTotal === 7) {
+      const currentPlayer = state.players[state.currentPlayerIndex];
+      // Trigger quiz for human player on 7 (if quiz pool is available)
+      const quizPool: QuizQuestion[] = QUIZ_QUESTIONS;
+      if (currentPlayer && !currentPlayer.isAI && quizPool.length > 0) {
+        const q = quizPool[Math.floor(Math.random() * quizPool.length)];
+        set({
+          showResourceGains: false,
+          highlightedTileIds: [],
+          diceAnimationStep: 0 as 0 | 1 | 2 | 3 | 4,
+          phase: 'quiz',
+          currentQuiz: { ...q, id: genId() },
+          quizResult: null,
+          quizResourcePickRemaining: 0,
+          turnTimerPausedForQuiz: true,
+        });
+        return;
+      }
       set({
         showResourceGains: false,
         highlightedTileIds: [],
@@ -719,15 +801,18 @@ export const useGameStore = create<GameStore>((set, get) => ({
       return;
     }
 
-    // 2 or 12 → draw 5 cards, let player pick one
+    // 2 or 12 → ギャンブルカード1枚引く
     if (diceTotal === 2 || diceTotal === 12) {
-      const shuffled = [...EVENT_CARDS].sort(() => Math.random() - 0.5);
-      const fiveCards: EventCard[] = shuffled.slice(0, 5).map(c => ({ ...c, id: genId() }));
+      const card = pickRandomGambleCard();
       set({
         showResourceGains: false,
         highlightedTileIds: [],
         diceAnimationStep: 0 as 0 | 1 | 2 | 3 | 4,
-        cardPickerMode: { cards: fiveCards, canRedraw: true },
+        phase: 'gamble',
+        gambleCard: card,
+        gambleStage: 'reveal',
+        gambleDiceRoll: null,
+        gambleResult: null,
       });
       return;
     }
@@ -970,7 +1055,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
   doTrade: (give, receive) => {
     const state = get();
     const player = state.players[state.currentPlayerIndex];
-    if (player.resources[give] < 3) return;
+    const rate = getTradeRate(player.id, give, state.settlements, state.ports || []);
+    if (player.resources[give] < rate) return;
 
     const newPlayers = state.players.map(p => {
       if (p.id !== player.id) return { ...p };
@@ -978,17 +1064,19 @@ export const useGameStore = create<GameStore>((set, get) => ({
         ...p,
         resources: {
           ...p.resources,
-          [give]: p.resources[give] - 3,
+          [give]: p.resources[give] - rate,
           [receive]: p.resources[receive] + 1,
         },
       };
     });
 
+    const giveName = give === 'rubber' ? 'ゴム' : give === 'oil' ? '石油' : give === 'gold' ? '金' : '食料';
+    const recvName = receive === 'rubber' ? 'ゴム' : receive === 'oil' ? '石油' : receive === 'gold' ? '金' : '食料';
     set({
       players: newPlayers,
       tradeCount: state.tradeCount + 1,
       gameLog: [...state.gameLog, generateGameLog(
-        `${player.name}が${give === 'rubber' ? 'ゴム' : give === 'oil' ? '石油' : give === 'gold' ? '金' : '食料'}3つを${receive === 'rubber' ? 'ゴム' : receive === 'oil' ? '石油' : receive === 'gold' ? '金' : '食料'}1つに交換！`,
+        `${player.name}が${giveName}${rate}つを${recvName}1つに交換！ (レート ${rate}:1)`,
         'trade', player.id
       )],
     });
@@ -1600,25 +1688,21 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
     const action = queue.shift()!;
 
-    // For resource_gain, update the player's resources immediately for UI feedback
-    if (action.type === 'resource_gain' && action.resource && action.resourceAmount) {
-      const newPlayers = state.players.map(p => {
-        if (p.id === action.playerId) {
-          return {
-            ...p,
-            resources: {
-              ...p.resources,
-              [action.resource!]: p.resources[action.resource!] + action.resourceAmount!,
-            },
-          };
-        }
-        return { ...p };
-      });
+    // ===== PERF FIX =====
+    // 過去はアクションごとに players/settlements/roads を毎回更新していて、
+    // 接続している全コンポーネント（OpponentBar/HexMap/GameLog 等）が
+    // 1ターンあたり数十回再レンダリングされてフリーズしていた。
+    //
+    // 修正: 中間アニメーション中は UI 用 state（currentAIAction/diceResult/
+    // highlightedTileIds/resourceGains）だけを更新する。
+    // players/settlements/roads は AI ターン終了時に _finalSimPlayers から
+    // 1回だけバッチで上書き（上の queue.length===0 ブロック参照）。
+    // ===================
 
+    if (action.type === 'resource_gain' && action.resource && action.resourceAmount) {
       set({
         currentAIAction: action,
         aiActionQueue: queue,
-        players: newPlayers,
         resourceGains: [{
           playerId: action.playerId,
           playerName: action.playerName,
@@ -1628,32 +1712,6 @@ export const useGameStore = create<GameStore>((set, get) => ({
           amount: action.resourceAmount,
         }],
         highlightedTileIds: action.highlightTileIds || [],
-      });
-    } else if (action.type === 'dice_gains' && action.diceGains) {
-      // Apply all resource gains at once
-      const newPlayers = state.players.map(p => {
-        const pGains = action.diceGains!.filter(g => g.playerId === p.id);
-        if (pGains.length === 0) return p;
-        const res = { ...p.resources };
-        pGains.forEach(g => { res[g.resource] += g.amount; });
-        return { ...p, resources: res };
-      });
-      set({
-        currentAIAction: action,
-        aiActionQueue: queue,
-        players: newPlayers,
-      });
-    } else if (action.type === 'lucky_seven') {
-      // Apply +1 of every resource to ALL players (not just the AI who rolled)
-      const newPlayers = state.players.map(p => {
-        const res = { ...p.resources };
-        res.rubber += 1; res.oil += 1; res.gold += 1; res.food += 1;
-        return { ...p, resources: res };
-      });
-      set({
-        currentAIAction: action,
-        aiActionQueue: queue,
-        players: newPlayers,
       });
     } else if (action.type === 'dice_roll') {
       set({
@@ -1668,108 +1726,19 @@ export const useGameStore = create<GameStore>((set, get) => ({
         aiActionQueue: queue,
         highlightedTileIds: [],
       });
-    } else if (action.type === 'ai_quiz') {
-      // Resources are already applied in sim; the UI popup is purely cosmetic.
+    } else if (
+      action.type === 'build_settlement' ||
+      action.type === 'build_road' ||
+      action.type === 'upgrade_city'
+    ) {
+      // 建設系: 視覚的なハイライトクリアのみ。実際の盤面更新はターン終了時バッチ。
       set({
         currentAIAction: action,
         aiActionQueue: queue,
-      });
-    } else if (action.type === 'event_card') {
-      // Effect already applied to simPlayers; show the card UI purely cosmetically.
-      set({
-        currentAIAction: action,
-        aiActionQueue: queue,
-      });
-    } else if (action.type === 'build_settlement' && action.vertexId) {
-      // Guard: only deduct cost if the player can actually afford it during
-      // the animation. Final state is reconciled from _finalSimPlayers when
-      // the queue drains, so the board still ends up correct either way —
-      // this just prevents a transient negative-resource flash in the UI.
-      const cost = BUILD_COSTS.settlement;
-      const newPlayers = state.players.map(p => {
-        if (p.id !== action.playerId) return p;
-        const canPay = (Object.entries(cost) as [ResourceType, number][])
-          .every(([r, amt]) => p.resources[r] >= amt);
-        if (!canPay) {
-          return { ...p, victoryPoints: p.victoryPoints + 1 };
-        }
-        const res = { ...p.resources };
-        (Object.entries(cost) as [ResourceType, number][]).forEach(([r, amt]) => { res[r] -= amt; });
-        return { ...p, resources: res, victoryPoints: p.victoryPoints + 1 };
-      });
-      const newSettlements = [...state.settlements, {
-        vertexId: action.vertexId,
-        playerId: action.playerId,
-        level: 'settlement' as const,
-      }];
-      set({
-        currentAIAction: action,
-        aiActionQueue: queue,
-        settlements: newSettlements,
         highlightedTileIds: [],
-      });
-    } else if (action.type === 'build_road' && action.edgeId && !action.tradeFrom) {
-      const cost = BUILD_COSTS.road;
-      const newPlayers = state.players.map(p => {
-        if (p.id !== action.playerId) return p;
-        const canPay = (Object.entries(cost) as [ResourceType, number][])
-          .every(([r, amt]) => p.resources[r] >= amt);
-        if (!canPay) return p;
-        const res = { ...p.resources };
-        (Object.entries(cost) as [ResourceType, number][]).forEach(([r, amt]) => { res[r] -= amt; });
-        return { ...p, resources: res };
-      });
-    } else if (action.type === 'build_road' && action.edgeId) {
-      const newRoads = [...state.roads, {
-        edgeId: action.edgeId,
-        playerId: action.playerId,
-      }];
-      set({
-        currentAIAction: action,
-        aiActionQueue: queue,
-        roads: newRoads,
-        highlightedTileIds: [],
-      });
-    } else if (action.type === 'build_road' && action.tradeFrom && action.tradeTo) {
-      // Trade action (reuses build_road type)
-      const newPlayers = state.players.map(p => {
-        if (p.id !== action.playerId) return p;
-        if (p.resources[action.tradeFrom!] < 3) return p;
-        const res = { ...p.resources };
-        res[action.tradeFrom!] -= 3;
-        res[action.tradeTo!] += 1;
-        return { ...p, resources: res };
-      });
-      set({
-        currentAIAction: action,
-        aiActionQueue: queue,
-        players: newPlayers,
-        highlightedTileIds: [],
-      });
-    } else if (action.type === 'upgrade_city' && action.vertexId) {
-      const cost = BUILD_COSTS.city;
-      const newPlayers = state.players.map(p => {
-        if (p.id !== action.playerId) return p;
-        const canPay = (Object.entries(cost) as [ResourceType, number][])
-          .every(([r, amt]) => p.resources[r] >= amt);
-        if (!canPay) {
-          return { ...p, victoryPoints: p.victoryPoints + 1 };
-        }
-        const res = { ...p.resources };
-        (Object.entries(cost) as [ResourceType, number][]).forEach(([r, amt]) => { res[r] -= amt; });
-        return { ...p, resources: res, victoryPoints: p.victoryPoints + 1 };
-      });
-      const newSettlements = state.settlements.map(s =>
-        s.vertexId === action.vertexId && s.playerId === action.playerId
-          ? { ...s, level: 'city' as const }
-          : s
-      );
-      set({
-        currentAIAction: action,
-        aiActionQueue: queue,
-        settlements: newSettlements,
       });
     } else {
+      // dice_gains / lucky_seven / ai_quiz / event_card / その他: UI のみ更新
       set({
         currentAIAction: action,
         aiActionQueue: queue,
@@ -1844,6 +1813,80 @@ export const useGameStore = create<GameStore>((set, get) => ({
   dismissTutorialMessage: () => set({ tutorialMessage: null }),
 
   // =============================================
+  // GAMBLE CARD (2 or 12)
+  // =============================================
+  resolveGamble: (diceRoll) => {
+    const state = get();
+    const card = state.gambleCard;
+    if (!card) return;
+    const player = state.players[state.currentPlayerIndex];
+    const ctx = {
+      playerId: player.id,
+      players: state.players,
+      settlements: state.settlements,
+      roads: state.roads,
+    };
+    const result = card.resolve(diceRoll, ctx);
+
+    // Apply changes
+    const patch: Partial<GameStore> = {
+      gambleResult: result,
+      gambleStage: 'result',
+      gambleDiceRoll: diceRoll,
+    };
+    if (result.changes.players) patch.players = result.changes.players;
+    if (result.changes.settlements) patch.settlements = result.changes.settlements;
+    if (result.changes.roads) patch.roads = result.changes.roads;
+
+    // Free road auto-build
+    if (result.buildFreeRoads && result.buildFreeRoads > 0) {
+      const newRoads = [...(result.changes.roads || state.roads)];
+      const tempSettlements = result.changes.settlements || state.settlements;
+      let placed = 0;
+      for (let i = 0; i < result.buildFreeRoads; i++) {
+        const validEdges = getValidRoadEdges(
+          player.id, state.edges, state.vertices, tempSettlements, newRoads, false
+        );
+        if (validEdges.length === 0) break;
+        // Pick random valid edge
+        const eId = validEdges[Math.floor(Math.random() * validEdges.length)];
+        newRoads.push({ edgeId: eId, playerId: player.id });
+        placed++;
+      }
+      patch.roads = newRoads;
+      result.message += `（${placed}本配置）`;
+    }
+
+    patch.gameLog = [
+      ...state.gameLog,
+      generateGameLog(`🎴 ${card.icon} ${card.title}: ${result.message}`, 'event', player.id),
+    ];
+
+    set(patch);
+  },
+
+  dismissGamble: () => {
+    set({
+      gambleCard: null,
+      gambleStage: null,
+      gambleDiceRoll: null,
+      gambleResult: null,
+      phase: 'action',
+    });
+  },
+
+  setAiSpeed: (speed) => {
+    saveAiSpeed(speed);
+    set({ aiSpeed: speed });
+  },
+  cycleAiSpeed: () => {
+    const cur = get().aiSpeed;
+    const next: AISpeed = cur === 'slow' ? 'normal' : cur === 'normal' ? 'fast' : 'slow';
+    saveAiSpeed(next);
+    set({ aiSpeed: next });
+  },
+
+  // =============================================
   // STAGE MODE
   // =============================================
   initStageGame: (stageId) => {
@@ -1858,6 +1901,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
         ? generate1d6Map()
         : generateMap();
     const { vertices, edges } = generateVerticesAndEdges(finalTiles, isLarge ? stage.mapRows : undefined);
+    const stagePorts = stage.specialRules.enablePorts ? generatePorts(edges) : [];
 
     const humanPlayer = createPlayer('プレイヤー', 0, false, true);
     const aiPlayers = stage.aiSlots.map((slot) =>
@@ -1954,6 +1998,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
       handoffPlayerIndex: null,
       mapRows: isLarge ? stage.mapRows : undefined,
       tutorialMessage: stage.tutorialMessage ?? null,
+      ports: stagePorts,
     });
   },
 

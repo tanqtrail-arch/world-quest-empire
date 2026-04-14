@@ -55,7 +55,7 @@ function CircularTimer({ timeRemaining, total }: { timeRemaining: number; total:
 function QuizCardBack({ onFlip }: { onFlip: () => void }) {
   return (
     <div
-      className="w-full max-w-sm rounded-2xl overflow-hidden shadow-2xl cursor-pointer"
+      className="w-full max-w-sm rounded-2xl overflow-y-auto max-h-[90vh] shadow-2xl cursor-pointer"
       style={{
         background: 'linear-gradient(145deg, #1B3A5C 0%, #0D1F33 40%, #1A3050 70%, #0A1628 100%)',
         border: '4px solid #3498DB',
@@ -362,7 +362,6 @@ function AIQuizView() {
 
 /* ---- Main Quiz Popup (inner — only mounted when visible) ---- */
 function QuizPopupInner() {
-  console.count('[render] QuizPopupInner');
   const phase = useGameStore(s => s.phase);
   const currentQuiz = useGameStore(s => s.currentQuiz);
   const quizResult = useGameStore(s => s.quizResult);
@@ -501,8 +500,8 @@ function QuizPopupInner() {
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
-        className="fixed inset-0 z-50 flex items-center justify-center p-4"
-        style={{ background: 'rgba(0,0,0,0.65)', perspective: '1200px' }}
+        className="fixed inset-0 z-50 flex items-center justify-center p-4 overflow-y-auto"
+        style={{ background: 'rgba(0,0,0,0.65)', perspective: '1200px', WebkitOverflowScrolling: 'touch' }}
       >
         {/* 3D Flip container */}
         <motion.div
@@ -692,7 +691,6 @@ function QuizPopupInner() {
 
 /* ---- Gate wrapper: only mounts QuizPopupInner when visible ---- */
 export default function QuizPopup() {
-  console.count('[render] QuizPopup gate');
   const phase = useGameStore(s => s.phase);
   const aiActionType = useGameStore(s => s.currentAIAction?.type);
   const isVisible = phase === 'quiz' || aiActionType === 'ai_quiz';

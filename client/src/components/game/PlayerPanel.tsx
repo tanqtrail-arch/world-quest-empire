@@ -12,7 +12,6 @@ import { motion, AnimatePresence } from 'framer-motion';
 const resourceOrder: ResourceType[] = ['rubber', 'oil', 'gold', 'food'];
 
 function PlayerPanel() {
-  console.count('[render] PlayerPanel');
   const players = useGameStore(s => s.players);
   const currentPlayerIndex = useGameStore(s => s.currentPlayerIndex);
   const currentTurn = useGameStore(s => s.currentTurn);

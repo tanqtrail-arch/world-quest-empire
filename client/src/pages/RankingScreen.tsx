@@ -141,16 +141,24 @@ export default function RankingScreen() {
 
   return (
     <div
-      className="min-h-screen flex flex-col items-center relative overflow-auto"
+      className="flex flex-col items-center relative overflow-hidden"
       style={{
+        height: '100dvh',
         backgroundImage: `url(${HERO_BG})`,
         backgroundSize: 'cover',
         backgroundPosition: 'center',
       }}
     >
-      <div className="absolute inset-0 bg-black/50" />
+      <div className="absolute inset-0 bg-black/50 pointer-events-none" />
 
-      <div className="relative z-10 w-full max-w-lg mx-auto p-4">
+      <div
+        className="relative z-10 w-full max-w-lg mx-auto p-4 overflow-y-auto"
+        style={{
+          height: '100dvh',
+          WebkitOverflowScrolling: 'touch',
+          overscrollBehavior: 'contain',
+        }}
+      >
         {/* Back button */}
         <motion.button
           initial={{ x: -20, opacity: 0 }}

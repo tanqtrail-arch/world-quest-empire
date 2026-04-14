@@ -19,7 +19,6 @@ interface ResourcePopupItem {
 }
 
 function OpponentBar() {
-  console.count('[render] OpponentBar');
   const players = useGameStore(s => s.players);
   const currentPlayerIndex = useGameStore(s => s.currentPlayerIndex);
   const isPlayingAI = useGameStore(s => s.isPlayingAI);

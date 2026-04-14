@@ -2,7 +2,7 @@
 import {
   type GameTile, type Player, type Resources, type ResourceType, type TileType,
   type EventCard, type GameLogEntry, type Difficulty,
-  type Vertex, type Edge, type Settlement, type Road,
+  type Vertex, type Edge, type Settlement, type Road, type Port,
   HEX_LAYOUT, TILE_DISTRIBUTION, TILE_DISTRIBUTION_LARGE, DICE_NUMBERS, EVENT_CARDS,
   BUILD_COSTS, VP_VALUES, WINNING_SCORE, PLAYER_COLORS,
 } from './gameTypes';
@@ -221,6 +221,63 @@ export function rollDice(): [number, number] {
 
 export function rollSingleDice(): number {
   return Math.floor(Math.random() * 6) + 1;
+}
+
+// =============================================
+// PORTS: マップ外周に港6つ配置
+// =============================================
+// general×2 (3:1)、各資源港 ×1 (rubber/oil/gold/food, 2:1)
+// 外周の辺 (adjacentTileIds.length === 1) を等間隔に6つ選んで配置。
+
+export function generatePorts(edges: Edge[]): Port[] {
+  const perimeter = edges.filter(e => e.adjacentTileIds.length === 1);
+  if (perimeter.length < 6) return [];
+
+  // 中心を計算してangleでソート（時計回りに並べる）
+  const cx = perimeter.reduce((s, e) => s + (e.x1 + e.x2) / 2, 0) / perimeter.length;
+  const cy = perimeter.reduce((s, e) => s + (e.y1 + e.y2) / 2, 0) / perimeter.length;
+  const sorted = [...perimeter].sort((a, b) => {
+    const angA = Math.atan2((a.y1 + a.y2) / 2 - cy, (a.x1 + a.x2) / 2 - cx);
+    const angB = Math.atan2((b.y1 + b.y2) / 2 - cy, (b.x1 + b.x2) / 2 - cx);
+    return angA - angB;
+  });
+
+  const portTypes: Port['type'][] = ['general', 'rubber', 'general', 'oil', 'gold', 'food'];
+  const step = Math.max(1, Math.floor(sorted.length / 6));
+  const ports: Port[] = [];
+  for (let i = 0; i < 6; i++) {
+    const e = sorted[Math.min(i * step, sorted.length - 1)];
+    ports.push({
+      id: `port-${i}`,
+      type: portTypes[i],
+      vertexIds: [e.vertexIds[0], e.vertexIds[1]],
+    });
+  }
+  return ports;
+}
+
+/**
+ * 交易レート判定。
+ * - 自分の拠点が一致資源港に隣接 → 2:1
+ * - 自分の拠点が general 港に隣接 → 3:1
+ * - それ以外 → 4:1
+ */
+export function getTradeRate(
+  playerId: string,
+  resource: ResourceType,
+  settlements: Settlement[],
+  ports: Port[]
+): number {
+  let best = 4;
+  for (const port of ports) {
+    const owns = port.vertexIds.some(vid =>
+      settlements.some(s => s.vertexId === vid && s.playerId === playerId)
+    );
+    if (!owns) continue;
+    if (port.type === resource && best > 2) best = 2;
+    else if (port.type === 'general' && best > 3) best = 3;
+  }
+  return best;
 }
 
 // =============================================

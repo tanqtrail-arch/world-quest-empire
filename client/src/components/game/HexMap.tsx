@@ -27,6 +27,7 @@ function DiceResultZoom({ diceTotal, tiles, playerColors, playerFlags, onClose, 
   settlements: any[];
   vertices: any[];
 }) {
+  const isLuckySeven = diceTotal === 7;
   const matchingTiles = tiles.filter(t => t.diceNumber === diceTotal && t.type !== 'sea' && t.type !== 'desert');
 
   // Find which players gain from each tile
@@ -44,6 +45,11 @@ function DiceResultZoom({ diceTotal, tiles, playerColors, playerFlags, onClose, 
   });
 
   const hasAnyGains = tileGains.some(tg => tg.gains.length > 0);
+
+  // Lucky 7: list of all players (for banner display)
+  const allPlayerIds = isLuckySeven
+    ? Array.from(new Set(settlements.map((s: any) => s.playerId))).filter((id): id is string => typeof id === 'string')
+    : [];
 
   return (
     <motion.div
@@ -68,7 +74,33 @@ function DiceResultZoom({ diceTotal, tiles, playerColors, playerFlags, onClose, 
           </div>
         </div>
 
-        {matchingTiles.length === 0 ? (
+        {isLuckySeven ? (
+          <div className="space-y-3">
+            <div className="text-center bg-gradient-to-r from-yellow-400 to-amber-500 rounded-xl p-3 text-white font-bold shadow-lg">
+              <div className="text-2xl mb-1">🎉 ラッキー7！</div>
+              <div className="text-sm">全プレイヤーが全資源 +1！</div>
+            </div>
+            <div className="bg-white/80 rounded-lg p-2.5 border border-amber-200 space-y-1.5">
+              {allPlayerIds.map((pid: string) => (
+                <div key={pid} className="flex items-center gap-2 text-sm">
+                  <span className="text-lg">{playerFlags[pid] || '🏴'}</span>
+                  <span className="flex-1 font-bold" style={{ color: playerColors[pid] }}>
+                    全員もらえる
+                  </span>
+                  <span className="flex gap-1 text-xs font-bold">
+                    <span className="px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800">🌿+1</span>
+                    <span className="px-1.5 py-0.5 rounded bg-slate-200 text-slate-800">🛢️+1</span>
+                    <span className="px-1.5 py-0.5 rounded bg-amber-100 text-amber-800">💰+1</span>
+                    <span className="px-1.5 py-0.5 rounded bg-orange-100 text-orange-800">🌾+1</span>
+                  </span>
+                </div>
+              ))}
+              {allPlayerIds.length === 0 && (
+                <div className="text-center text-xs text-gray-500">全員に+1ずつ配布されました</div>
+              )}
+            </div>
+          </div>
+        ) : matchingTiles.length === 0 ? (
           <div className="text-center text-gray-600 py-3 text-sm">
             この出目({diceTotal})のタイルはありません
           </div>
@@ -135,6 +167,36 @@ function DiceResultZoom({ diceTotal, tiles, playerColors, playerFlags, onClose, 
   );
 }
 
+// --- Solid fallback colors (guaranteed: never undefined) ---
+// Used as base layer so tiles are NEVER transparent even if gradient fails to resolve.
+const TILE_SOLID_COLOR: Record<string, string> = {
+  rubber: '#2E7D32',
+  oil: '#37474F',
+  gold: '#F9A825',
+  food: '#E65100',
+  desert: '#A0785A',
+  sea: '#0288D1',
+};
+const TILE_FALLBACK_COLOR = '#8B6914'; // brownish — last-resort fallback
+
+const TILE_GRADIENTS: Record<string, [string, string]> = {
+  rubber: ['#66BB6A', '#2E7D32'],
+  oil: ['#546E7A', '#263238'],
+  gold: ['#FFD54F', '#F9A825'],
+  food: ['#FFA726', '#E65100'],
+  desert: ['#D4A574', '#A0785A'],
+  sea: ['#4FC3F7', '#0288D1'],
+};
+
+function getSolidColor(type: string | undefined): string {
+  if (!type) return TILE_FALLBACK_COLOR;
+  return TILE_SOLID_COLOR[type] || TILE_FALLBACK_COLOR;
+}
+function getGradientColors(type: string | undefined): [string, string] {
+  if (!type) return [TILE_FALLBACK_COLOR, TILE_FALLBACK_COLOR];
+  return TILE_GRADIENTS[type] || [TILE_FALLBACK_COLOR, TILE_FALLBACK_COLOR];
+}
+
 // --- Single Hex Tile (memoized: re-renders only when its props change) ---
 const HexTile = memo(function HexTile({ tile, cx, cy, isHighlighted, isDimmed }: {
   tile: GameTile;
@@ -144,18 +206,8 @@ const HexTile = memo(function HexTile({ tile, cx, cy, isHighlighted, isDimmed }:
   isDimmed?: boolean;
 }) {
   const resInfo = tile.type !== 'sea' && tile.type !== 'desert' ? RESOURCE_INFO[tile.type as ResourceType] : null;
-
-  const getGradient = (type: TileType): [string, string] => {
-    switch (type) {
-      case 'rubber': return ['#66BB6A', '#2E7D32'];
-      case 'oil': return ['#546E7A', '#263238'];
-      case 'gold': return ['#FFD54F', '#F9A825'];
-      case 'food': return ['#FFA726', '#E65100'];
-      case 'desert': return ['#D4A574', '#A0785A'];
-      case 'sea': return ['#4FC3F7', '#0288D1'];
-    }
-  };
-  const [c1, c2] = getGradient(tile.type);
+  const solidColor = getSolidColor(tile.type);
+  const [c1, c2] = getGradientColors(tile.type);
 
   return (
     <g
@@ -163,7 +215,8 @@ const HexTile = memo(function HexTile({ tile, cx, cy, isHighlighted, isDimmed }:
         filter: isHighlighted
           ? 'drop-shadow(0 0 16px rgba(255, 215, 0, 1))'
           : 'drop-shadow(0 3px 4px rgba(0,0,0,0.35))',
-        opacity: isDimmed ? 0.3 : 1,
+        // NEVER opacity:0 — minimum 0.35 so tiles always remain visible
+        opacity: isDimmed ? 0.35 : 1,
         transition: 'opacity 0.4s ease, filter 0.4s ease',
       }}
     >
@@ -174,7 +227,13 @@ const HexTile = memo(function HexTile({ tile, cx, cy, isHighlighted, isDimmed }:
         </linearGradient>
       </defs>
 
-      {/* Main hex polygon */}
+      {/* BASE solid-color polygon (guaranteed visible: never depends on gradient resolution) */}
+      <polygon
+        points={getHexPoints(cx, cy, HEX_SIZE - 1)}
+        fill={solidColor}
+      />
+
+      {/* Main hex polygon (gradient overlay; if gradient fails to resolve, base layer below remains visible) */}
       <polygon
         points={getHexPoints(cx, cy, HEX_SIZE - 1)}
         fill={`url(#grad-${tile.id})`}
@@ -551,6 +610,91 @@ const InteractiveEdgesLayer = memo(function InteractiveEdgesLayer({
   );
 });
 
+// ----- Inline build confirm/cancel buttons (positioned on selected vertex or edge) -----
+function BuildConfirmButtons({
+  buildMode, selectedVertexId, selectedEdgeId, vertexMap, edgeMap,
+}: {
+  buildMode: 'settlement' | 'city' | 'road' | null;
+  selectedVertexId: string | null;
+  selectedEdgeId: string | null;
+  vertexMap: Map<string, VertexLite>;
+  edgeMap: Map<string, EdgeLite>;
+}) {
+  if (!buildMode) return null;
+
+  let cx = 0, cy = 0;
+  if ((buildMode === 'settlement' || buildMode === 'city') && selectedVertexId) {
+    const v = vertexMap.get(selectedVertexId);
+    if (!v) return null;
+    cx = v.x; cy = v.y;
+  } else if (buildMode === 'road' && selectedEdgeId) {
+    const e = edgeMap.get(selectedEdgeId);
+    if (!e) return null;
+    cx = (e.x1 + e.x2) / 2;
+    cy = (e.y1 + e.y2) / 2;
+  } else {
+    return null;
+  }
+
+  const handleConfirm = () => useGameStore.getState().confirmBuild();
+  const handleCancel = () => useGameStore.getState().cancelBuild();
+
+  // foreignObject で HTML ボタンをマップ上にオーバーレイ
+  const W = 88;
+  const H = 38;
+  return (
+    <foreignObject x={cx - W / 2} y={cy - H - 28} width={W} height={H} style={{ overflow: 'visible' }}>
+      <div
+        style={{
+          display: 'flex',
+          gap: 6,
+          width: '100%',
+          height: '100%',
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
+        <button
+          onClick={handleConfirm}
+          aria-label="建設を確定"
+          style={{
+            width: 38, height: 34,
+            borderRadius: 8,
+            background: 'linear-gradient(180deg, #2ECC71, #27AE60)',
+            border: '2px solid #1E8449',
+            color: '#fff',
+            fontSize: 18,
+            fontWeight: 'bold',
+            cursor: 'pointer',
+            boxShadow: '0 2px 6px rgba(0,0,0,0.4), 0 0 12px rgba(46,204,113,0.6)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}
+        >
+          ✅
+        </button>
+        <button
+          onClick={handleCancel}
+          aria-label="建設をキャンセル"
+          style={{
+            width: 38, height: 34,
+            borderRadius: 8,
+            background: 'linear-gradient(180deg, #E74C3C, #C0392B)',
+            border: '2px solid #922B21',
+            color: '#fff',
+            fontSize: 18,
+            fontWeight: 'bold',
+            cursor: 'pointer',
+            boxShadow: '0 2px 6px rgba(0,0,0,0.4), 0 0 12px rgba(231,76,60,0.6)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}
+        >
+          ❌
+        </button>
+      </div>
+    </foreignObject>
+  );
+}
+
 // ----- Interactive vertices (buildable) -----
 const InteractiveVerticesLayer = memo(function InteractiveVerticesLayer({
   vertexIds, vertexMap, selectedVertexId, onVertexClick,
@@ -592,7 +736,6 @@ const InteractiveVerticesLayer = memo(function InteractiveVerticesLayer({
 
 // --- Main HexMap Component ---
 function HexMap() {
-  console.count('[render] HexMap');
   // Narrow selectors — each subscribes only to a single slice so unrelated
   // store updates (e.g. game log entries) do not re-render the map.
   const tiles = useGameStore(s => s.tiles);
@@ -798,6 +941,14 @@ function HexMap() {
             vertexMap={vertexMap}
             selectedVertexId={selectedVertexId}
             onVertexClick={handleVertexClick}
+          />
+          {/* インライン確定/キャンセルボタン (選択頂点/辺の上に表示) */}
+          <BuildConfirmButtons
+            buildMode={buildMode}
+            selectedVertexId={selectedVertexId}
+            selectedEdgeId={selectedEdgeId}
+            vertexMap={vertexMap}
+            edgeMap={edgeMap}
           />
         </svg>
       </div>

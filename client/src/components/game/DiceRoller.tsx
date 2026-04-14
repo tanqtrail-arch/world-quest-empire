@@ -50,7 +50,6 @@ function DiceFace({ value, size = 52 }: { value: number; size?: number }) {
 }
 
 function DiceRoller() {
-  console.count('[render] DiceRoller');
   const phase = useGameStore(s => s.phase);
   const diceResult = useGameStore(s => s.diceResult);
   const doRollDice = useGameStore(s => s.doRollDice);

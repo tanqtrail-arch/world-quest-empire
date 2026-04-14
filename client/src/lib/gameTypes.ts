@@ -107,6 +107,7 @@ export type GamePhase =
   | 'trading'
   | 'event'
   | 'quiz'        // 歴史クイズ表示中
+  | 'gamble'      // ギャンブルカード表示中（2/12）
   | 'ai_turn'
   | 'handoff'     // ローカル対戦: 端末渡し画面
   | 'finished';
@@ -263,4 +264,5 @@ export const QUIZ_DIFFICULTY_INFO: Record<QuizDifficulty, { label: string; icon:
   hard:   { label: 'むずかしい', icon: '⭐⭐⭐', color: '#E74C3C' },
 };
 
-export const QUIZ_QUESTIONS: QuizQuestion[] = [];
+// Quiz questions are defined in ./quizData.ts and re-exported here for backward compat
+export { QUIZ_DATA as QUIZ_QUESTIONS } from './quizData';

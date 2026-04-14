@@ -7,13 +7,12 @@
  */
 import { useGameStore } from '@/lib/gameStore';
 import { BUILD_COSTS, RESOURCE_INFO, type ResourceType } from '@/lib/gameTypes';
-import { canAfford, getUpgradeableVertices, getValidSettlementVertices, getValidRoadEdges } from '@/lib/gameLogic';
+import { canAfford, getUpgradeableVertices, getValidSettlementVertices, getValidRoadEdges, getTradeRate } from '@/lib/gameLogic';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useState, memo } from 'react';
 import { Hammer, ArrowRightLeft, SkipForward, X, Check } from 'lucide-react';
 
 function ActionMenu() {
-  console.count('[render] ActionMenu');
   const phase = useGameStore(s => s.phase);
   const players = useGameStore(s => s.players);
   const currentPlayerIndex = useGameStore(s => s.currentPlayerIndex);
@@ -83,15 +82,8 @@ function ActionMenu() {
                 </div>
               </div>
             </div>
+            {/* 確定ボタンはマップ上に表示するためここでは省略。キャンセルだけ残す */}
             <div className="flex gap-1.5">
-              {hasSelection && (
-                <button
-                  onClick={confirmBuild}
-                  className="bg-emerald-500 text-white rounded-full p-1.5 hover:bg-emerald-600 transition-colors"
-                >
-                  <Check size={16} />
-                </button>
-              )}
               <button
                 onClick={handleCancelBuild}
                 className="bg-red-500 text-white rounded-full p-1.5 hover:bg-red-600 transition-colors"
@@ -161,7 +153,7 @@ function ActionMenu() {
             className="parchment rounded-xl p-3 mb-2"
           >
             <h3 className="font-heading font-bold text-amber-900 text-center mb-2">
-              交換する（3つ → 1つ）
+              交換する（基本 4:1、港なら 3:1 / 2:1）
             </h3>
             <TradePanel onClose={() => setShowTrade(false)} />
           </motion.div>
@@ -265,28 +257,50 @@ function TradePanel({ onClose }: { onClose: () => void }) {
 
   if (!player) return null;
 
+  // 各資源の交換レート（港判定）
+  const rates: Record<ResourceType, number> = {
+    rubber: getTradeRate(player.id, 'rubber', settlements, ports),
+    oil:    getTradeRate(player.id, 'oil',    settlements, ports),
+    gold:   getTradeRate(player.id, 'gold',   settlements, ports),
+    food:   getTradeRate(player.id, 'food',   settlements, ports),
+  };
+
   if (!giveRes) {
+    const hasAnyPort = Object.values(rates).some(r => r < 4);
     return (
       <div>
         <p className="text-amber-800 text-sm text-center mb-2">
-          どの資源を3つ出す？
+          どの資源を出す？
         </p>
+        {hasAnyPort && (
+          <p className="text-emerald-700 text-xs text-center mb-2">
+            ⚓ 港が近くにあるとお得に交換できる！
+          </p>
+        )}
         <div className="grid grid-cols-2 gap-2">
           {resources.map(res => {
             const info = RESOURCE_INFO[res];
-            const hasEnough = player.resources[res] >= 3;
+            const rate = rates[res];
+            const hasEnough = player.resources[res] >= rate;
+            const isPortRate = rate < 4;
             return (
               <button
                 key={res}
                 disabled={!hasEnough}
                 onClick={() => setGiveRes(res)}
-                className={`p-2 rounded-lg font-heading font-bold text-sm ${
+                className={`p-2 rounded-lg font-heading font-bold text-sm relative ${
                   hasEnough
                     ? 'bg-white border-2 border-amber-400 text-amber-900 active:scale-95'
                     : 'bg-gray-100 border-2 border-gray-300 text-gray-400'
                 }`}
               >
+                {isPortRate && (
+                  <span className="absolute -top-1.5 -right-1.5 bg-emerald-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full shadow">
+                    ⚓{rate}:1
+                  </span>
+                )}
                 {info.icon} {info.name} ({player.resources[res]})
+                <div className="text-[10px] text-amber-600 mt-0.5">{rate}つで1つ</div>
               </button>
             );
           })}
@@ -301,10 +315,11 @@ function TradePanel({ onClose }: { onClose: () => void }) {
     );
   }
 
+  const giveRate = rates[giveRes];
   return (
     <div>
       <p className="text-amber-800 text-sm text-center mb-2">
-        {RESOURCE_INFO[giveRes].icon} {RESOURCE_INFO[giveRes].name}3つで何がほしい？
+        {RESOURCE_INFO[giveRes].icon} {RESOURCE_INFO[giveRes].name}{giveRate}つで何がほしい？
       </p>
       <div className="grid grid-cols-2 gap-2">
         {resources.filter(r => r !== giveRes).map(res => {

@@ -4,11 +4,10 @@
  */
 import { useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { useGameStore, type AIAction } from '@/lib/gameStore';
+import { useGameStore, type AIAction, AI_SPEED_MULTIPLIER } from '@/lib/gameStore';
 import { RESOURCE_INFO } from '@/lib/gameTypes';
 
-// Duration for each action display (ms)
-// Durations cut ~30% from previous values for snappier AI playback.
+// Base duration for each action display (ms) — multiplied by AI_SPEED_MULTIPLIER
 const ACTION_DURATIONS: Record<AIAction['type'], number> = {
   turn_start: 1050,
   dice_roll: 1550,
@@ -411,7 +410,13 @@ export default function AITurnOverlay() {
   useEffect(() => {
     if (!currentAIAction || phase !== 'ai_turn') return;
 
-    const duration = ACTION_DURATIONS[currentAIAction.type] || 1200;
+    // Read aiSpeed at scheduling time (not subscribed) so a mid-turn
+    // speed change applies from the NEXT action onward without re-running
+    // this effect on every speed toggle.
+    const aiSpeed = useGameStore.getState().aiSpeed;
+    const multiplier = AI_SPEED_MULTIPLIER[aiSpeed] ?? 1;
+    const baseDuration = ACTION_DURATIONS[currentAIAction.type] || 1200;
+    const duration = Math.max(80, Math.round(baseDuration * multiplier));
 
     timerRef.current = setTimeout(() => {
       const state = useGameStore.getState();

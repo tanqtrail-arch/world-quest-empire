@@ -259,7 +259,6 @@ export default function EventCardDisplay({
   onDismiss,
   autoFlipDelay = 600,
 }: EventCardDisplayProps) {
-  console.count('[render] EventCardDisplay');
   const [isFlipped, setIsFlipped] = useState(false);
   const [isVisible, setIsVisible] = useState(false);
 
@@ -403,14 +402,18 @@ export function CardPickerView() {
   return (
     <AnimatePresence>
       <motion.div
-        className="fixed inset-0 z-50 flex flex-col items-center justify-center"
+        className="fixed inset-0 z-50 flex flex-col items-center justify-center overflow-y-auto py-4"
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
+        style={{ WebkitOverflowScrolling: 'touch' }}
       >
-        <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" />
+        <div className="absolute inset-0 bg-black/70 backdrop-blur-sm pointer-events-none" />
 
-        <div className="relative z-10 flex flex-col items-center gap-4 px-3 max-w-lg w-full">
+        <div
+          className="relative z-10 flex flex-col items-center gap-4 px-3 max-w-lg w-full overflow-y-auto"
+          style={{ maxHeight: '90vh', WebkitOverflowScrolling: 'touch' }}
+        >
           <motion.div
             initial={{ y: -20, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
